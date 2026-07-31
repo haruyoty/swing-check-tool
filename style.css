@@ -145,6 +145,24 @@ main, .site-header, .site-footer { max-width: 780px; margin: 0 auto; }
 
 #video { width: 100%; border-radius: var(--radius); margin-top: 16px; }
 
+/* スマホでその場で撮るためのボタン（カメラのある端末にだけ出す） */
+.capture-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 15px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: .95rem;
+  cursor: pointer;
+}
+.capture-btn::before { content: '📷'; font-size: 1.15rem; }
+.capture-btn:active { filter: brightness(.92); }
+
 /* ----------------------------- 写真スロット ------------------------------ */
 
 .mode-group { margin-bottom: 16px; }
@@ -540,7 +558,9 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   flex-wrap: wrap;
 }
 .item-label { font-weight: 600; font-size: .93rem; }
-.item-value { font-size: .84rem; color: var(--ink-sub); white-space: nowrap; }
+/* 折り返しを禁じない。向きを言葉で出すようになって文字列が長くなり、
+   nowrap のままだと画面の広さに関係なく横にはみ出してしまうため */
+.item-value { font-size: .84rem; color: var(--ink-sub); }
 .item-value b { color: var(--ink); font-size: 1rem; }
 
 .gauge {
@@ -663,8 +683,28 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   vertical-align: 2px;
 }
 
+/* ------------------------------ スマホ向け -------------------------------- */
+
 @media (max-width: 520px) {
+  body { padding: 0 12px 48px; }
   .site-header { padding-top: 28px; }
-  .card { padding: 18px; }
+  .site-header h1 { font-size: 1.4rem; }
+  .card { padding: 16px 14px; }
   .score-card { justify-content: center; text-align: center; }
+}
+
+/* 指で押せる大きさを確保する（マウスより広い面積が要る） */
+@media (hover: none), (max-width: 620px) {
+  .frame-nav button { padding: 11px 0; font-size: .85rem; }
+  .chip span { padding: 10px 16px; font-size: .9rem; }
+  button.mini { padding: 11px 16px; font-size: .85rem; }
+  .checklist input { width: 20px; height: 20px; margin-top: 3px; }
+  .checklist label { gap: 12px; }
+  .primary, .secondary { padding: 14px 28px; width: 100%; }
+  .dropzone { padding: 28px 16px; }
+}
+
+/* 長い言葉が続いても、はみ出さずに折り返す */
+.item-label, .item-comment, .drill, .ref-table td, .lesson-meta span, .phase-empty {
+  overflow-wrap: anywhere;
 }
