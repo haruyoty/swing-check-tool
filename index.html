@@ -59,11 +59,17 @@
       <label class="dropzone" id="dropzone">
         <input type="file" id="fileInput" accept="video/*" hidden>
         <span class="dz-icon">＋</span>
-        <span class="dz-main">動画ファイルを選択</span>
-        <span class="dz-sub">ここにドラッグ＆ドロップでも可（mp4 / mov、10秒以内・全身が入るように）</span>
+        <span class="dz-main">動画ファイルを選ぶ</span>
+        <span class="dz-sub">スマホなら、この中の「ビデオを撮る」でその場で撮影できます。パソコンならドラッグ＆ドロップも可</span>
       </label>
+
+      <label class="capture-btn" id="captureBtn" hidden>
+        <input type="file" id="captureInput" accept="video/*" capture="environment" hidden>
+        <span>カメラでスイングを撮る</span>
+      </label>
+
       <div id="videoSlot">
-        <video id="video" playsinline muted controls hidden></video>
+        <video id="video" playsinline muted controls preload="auto" hidden></video>
       </div>
 
       <div id="rangeBox" hidden>

@@ -15,6 +15,8 @@ const els = {
   error: $('error'),
   setup: $('setup'),
   result: $('result'),
+  captureBtn: $('captureBtn'),
+  captureInput: $('captureInput'),
   videoInput: $('videoInput'),
   photoInput: $('photoInput'),
   photoGrid: $('photoGrid'),
@@ -238,6 +240,20 @@ els.fileInput.addEventListener('change', e => {
   if (file) loadVideo(file);
 });
 
+/* --------------------------- カメラで撮って取り込む -----------------------
+ * capture 付きの入力は、対応端末ではカメラが直接開きます。パソコンでは
+ * ただのファイル選択になって紛らわしいので、カメラがある端末だけに出します。
+ * ------------------------------------------------------------------------*/
+const hasCamera = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));   // iPadOS 対策
+
+if (hasCamera) els.captureBtn.hidden = false;
+
+els.captureInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadVideo(file);
+});
+
 function loadVideo(file) {
   if (!file.type.startsWith('video/')) {
     showError('動画ファイルを選んでください。');
@@ -375,8 +391,10 @@ async function getPose() {
   const pose = new Pose({
     locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}`
   });
+  // スマホでいちばん重いモデルを使うと解析が何分もかかります。
+  // 1 段軽いモデルでも、この道具が見ている体の位置や角度は十分に取れます。
   pose.setOptions({
-    modelComplexity: 2,
+    modelComplexity: hasCamera ? 1 : 2,
     smoothLandmarks: true,
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
