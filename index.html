@@ -1,0 +1,175 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ゴルフスイング診断ツール</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <h1>ゴルフスイング診断ツール</h1>
+  <p class="lead">スイング動画をアップロードすると、骨格を自動で検出して 10 項目を採点します。動画はブラウザの中だけで処理され、どこにも送信されません。</p>
+</header>
+
+<main>
+
+  <!-- ============================ 入力 ============================ -->
+  <section class="card" id="setup">
+    <h2>1. 撮影条件を選ぶ</h2>
+
+    <div class="opt-row">
+      <div class="opt-group">
+        <span class="opt-label">利き手</span>
+        <label class="chip"><input type="radio" name="hand" value="right" checked><span>右打ち</span></label>
+        <label class="chip"><input type="radio" name="hand" value="left"><span>左打ち</span></label>
+      </div>
+
+      <div class="opt-group">
+        <span class="opt-label">カメラの位置</span>
+        <label class="chip"><input type="radio" name="view" value="front" checked><span>正面（体の正面から）</span></label>
+        <label class="chip"><input type="radio" name="view" value="side"><span>後方（飛球線の後ろから）</span></label>
+      </div>
+
+      <div class="opt-group">
+        <span class="opt-label">使用クラブ</span>
+        <label class="chip"><input type="radio" name="club" value="driver" checked><span>ドライバー</span></label>
+        <label class="chip"><input type="radio" name="club" value="fwut"><span>FW・UT</span></label>
+        <label class="chip"><input type="radio" name="club" value="midiron"><span>5〜7番</span></label>
+        <label class="chip"><input type="radio" name="club" value="shortiron"><span>8番〜PW</span></label>
+        <label class="chip"><input type="radio" name="club" value="wedge"><span>アプローチ・SW</span></label>
+      </div>
+    </div>
+
+    <p class="note">
+      番手によってアドレスの基準（ボール位置・前傾角・重心配分など）が変わるため、使用クラブの選択が必要です。<br>
+      カメラの位置でも測れる項目が変わります。<strong>正面</strong>ではスウェー・体重移動・肩の回転、<strong>後方</strong>では前傾角と手元の位置が診断できます。
+      できれば両方の角度で撮って、それぞれ診断してください。
+    </p>
+
+    <h2>2. スイングを読み込む</h2>
+
+    <div class="opt-group mode-group">
+      <label class="chip"><input type="radio" name="mode" value="video" checked><span>動画から解析</span></label>
+      <label class="chip"><input type="radio" name="mode" value="photo"><span>ポジションごとの写真</span></label>
+    </div>
+
+    <div id="videoInput">
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" accept="video/*" hidden>
+        <span class="dz-icon">＋</span>
+        <span class="dz-main">動画ファイルを選択</span>
+        <span class="dz-sub">ここにドラッグ＆ドロップでも可（mp4 / mov、10秒以内・全身が入るように）</span>
+      </label>
+      <div id="videoSlot">
+        <video id="video" playsinline muted controls hidden></video>
+      </div>
+
+      <div id="rangeBox" hidden>
+        <p class="note">
+          自動でスイングの位置を探しますが、うまく合わないときは<strong>解析する範囲を手で指定</strong>できます。
+          上の動画を再生・スクラブして、<strong>アドレスの少し前</strong>と<strong>フィニッシュの少し後</strong>でボタンを押してください。
+        </p>
+        <div class="range-row">
+          <button type="button" class="mini" id="setStart">◀ 現在位置を開始に</button>
+          <button type="button" class="mini" id="setEnd">現在位置を終了に ▶</button>
+          <button type="button" class="mini" id="autoRange">自動で探す</button>
+          <button type="button" class="mini" id="clearRange">指定を消す</button>
+        </div>
+        <p class="range-readout" id="rangeReadout"></p>
+      </div>
+    </div>
+
+    <div id="photoInput" hidden>
+      <p class="note">
+        <strong>アドレスの写真は必須</strong>です（体格・向きの基準に使います）。他は入れたものだけ診断します。<br>
+        スイングテンポは時間差から求めるため、写真では判定できません。
+      </p>
+      <div class="photo-grid" id="photoGrid"></div>
+    </div>
+
+    <button id="analyzeBtn" class="primary" disabled>解析する</button>
+
+    <div id="progress" class="progress" hidden>
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <p class="progress-text" id="progressText">準備中…</p>
+    </div>
+
+    <p class="error" id="error" hidden></p>
+  </section>
+
+  <!-- ============================ 結果 ============================ -->
+  <section id="result" hidden>
+
+    <div class="card score-card">
+      <div class="score-ring" id="scoreRing">
+        <span class="score-num" id="scoreNum">0</span>
+        <span class="score-unit">点</span>
+      </div>
+      <div class="score-text">
+        <h2 id="summaryTitle"></h2>
+        <p id="summaryBody"></p>
+      </div>
+      <div class="whole-items" id="wholeItems"></div>
+    </div>
+
+    <p class="mode-note" id="modeNote" hidden></p>
+
+    <div class="card" id="videoCard" hidden>
+      <h2>スイング動画</h2>
+      <p class="note">各ポジションの画像をクリックすると、動画がその位置まで飛びます。</p>
+      <div id="videoHolder"></div>
+    </div>
+
+    <div class="card">
+      <h2>優先して直したい項目</h2>
+      <ol class="priorities" id="priorities"></ol>
+    </div>
+
+    <div class="card">
+      <h2><span id="clubName"></span> のアドレス基準</h2>
+      <p class="note">この番手で構えるときの目安と、実際のアドレスを並べています。</p>
+      <div class="ref-body">
+        <figure class="frame" id="refFrame"></figure>
+        <table class="ref-table" id="refTable"></table>
+      </div>
+    </div>
+
+    <p class="note lead-note">
+      以下、スイングのポジションごとに、そのコマの画像・計測した診断・目視で見てほしい点をまとめています。
+      画像の位置がずれている場合は <strong>◀◀ ◀ ▶ ▶▶</strong> でコマ送りして直し、
+      いちばん下の<strong>「修正した位置で診断し直す」</strong>を押してください。
+    </p>
+
+    <div id="phases"></div>
+
+    <div class="rediagnose" id="rediagnoseBox" hidden>
+      <p id="rediagnoseNote">キーフレームの位置を変えました。この位置で診断し直せます。</p>
+      <button type="button" id="rediagnoseBtn" class="primary">修正した位置で診断し直す</button>
+    </div>
+
+    <div class="card lesson-card" id="lessonCard" hidden>
+      <h2>今回のおすすめレッスン動画</h2>
+      <p class="note" id="lessonFor"></p>
+      <div id="lessonHolder"></div>
+    </div>
+
+    <button id="resetBtn" class="secondary">別の動画を診断する</button>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>本ツールは 2 次元映像からの推定です。実測値ではなく傾向の目安としてご利用ください。診断基準は <code>criteria.js</code> を編集すると変更できます。</p>
+</footer>
+
+<!-- MediaPipe Pose（インターネット接続が必要です） -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+<script src="criteria.js"></script>
+<script src="videos.js"></script>
+<script src="lessons.js"></script>
+<script src="analyzer.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
