@@ -24,6 +24,8 @@ const els = {
   videoSlot: $('videoSlot'),
   videoCard: $('videoCard'),
   videoHolder: $('videoHolder'),
+  videoNav: $('videoNav'),
+  videoNotes: $('videoNotes'),
   rangeBox: $('rangeBox'),
   rangeReadout: $('rangeReadout'),
   setStart: $('setStart'),
@@ -482,6 +484,112 @@ function showSwingVideo(opt) {
   if (opt.mode === 'photo') { els.videoCard.hidden = true; return; }
   els.videoHolder.appendChild(els.video);
   els.videoCard.hidden = false;
+  buildVideoNav();
+}
+
+/* ------------------- 動画をポジションで止めて注意点を出す ------------------- */
+
+/*
+ * 動画の下にポジションのボタンを並べ、押すとその位置で止めて注意点を出します。
+ * 手で一時停止・シークしたときも、いちばん近いポジションに切り替えます。
+ * NEAR_ENOUGH より離れているときは、どのポジションでもないので選択を外します。
+ */
+const NEAR_ENOUGH = 0.5;                              // 秒
+
+function buildVideoNav() {
+  els.videoNav.innerHTML = '';
+  els.videoNotes.innerHTML = '';
+  const { keys, frames, opt } = current;
+  if (!keys || opt.mode === 'photo') return;
+
+  for (const phase of PHASE_ORDER) {
+    if (keys[phase] === undefined) continue;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'video-nav-btn';
+    b.dataset.phase = phase;
+    b.textContent = shortPhaseLabel(phase);
+    b.addEventListener('click', () => jumpToPhase(phase));
+    els.videoNav.appendChild(b);
+  }
+  if (els.videoNav.children.length) showPhaseNotes(PHASE_ORDER.find(p => keys[p] !== undefined));
+}
+
+/** ボタンに入れる短い名前（PHASE_LABELS の括弧書きは長いので落とす） */
+function shortPhaseLabel(phase) {
+  return (PHASE_LABELS[phase] || phase).replace(/（.*）$/, '');
+}
+
+/** その位置まで動画を進めて止め、注意点を出す */
+function jumpToPhase(phase) {
+  const { keys, frames } = current;
+  if (!keys || keys[phase] === undefined) return;
+  els.video.pause();
+  els.video.currentTime = frames[keys[phase]].t;
+  showPhaseNotes(phase);
+}
+
+/** 今の再生位置にいちばん近いポジションへ切り替える */
+function syncPhaseToVideo() {
+  const { keys, frames } = current;
+  if (!keys || !frames) return;
+  const t = els.video.currentTime;
+  let best = null, bestGap = Infinity;
+  for (const phase of PHASE_ORDER) {
+    if (keys[phase] === undefined) continue;
+    const gap = Math.abs(frames[keys[phase]].t - t);
+    if (gap < bestGap) { best = phase; bestGap = gap; }
+  }
+  if (best && bestGap <= NEAR_ENOUGH) showPhaseNotes(best);
+  else for (const b of els.videoNav.children) b.classList.remove('active');
+}
+
+els.video.addEventListener('pause', syncPhaseToVideo);
+els.video.addEventListener('seeked', syncPhaseToVideo);
+
+/** 動画の下に、そのポジションの注意点を出す */
+function showPhaseNotes(phase) {
+  const result = current.lastResult;
+  if (!result) return;
+
+  for (const b of els.videoNav.children) b.classList.toggle('active', b.dataset.phase === phase);
+
+  const box = els.videoNotes;
+  box.innerHTML = '';
+  box.appendChild(text('h3', PHASE_LABELS[phase] || phase));
+
+  const items = result.items.filter(i => i.phase === phase);
+  const checks = VISUAL_CHECKS.filter(
+    c => c.phase === phase && (c.view === 'both' || c.view === current.opt.view));
+
+  if (!items.length && !checks.length) {
+    box.appendChild(text('p', 'この撮影角度では、このポジションの注意点はありません。'));
+    return;
+  }
+
+  // 基準を外れたものを先に。同じ状態のなかでは点数の低い順
+  for (const item of [...items].sort((a, b) => a.score - b.score)) {
+    const row = document.createElement('div');
+    row.className = 'note-row ' + (item.score >= 90 ? 's-good' : item.score >= 60 ? 's-warn' : 's-bad');
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = item.score >= 90 ? '良好' : item.score >= 60 ? '要注意' : '要改善';
+    const value = text('span',
+      `${fmt(item.value, item.unit, item.signLabels)}（目安 ${fmtRange(item.ideal, item.unit, item.signLabels)}）`);
+    value.className = 'note-value';
+    row.append(badge, text('b', item.label), value, text('p', item.comment));
+    box.appendChild(row);
+  }
+
+  for (const c of checks) {
+    const row = document.createElement('div');
+    row.className = 'note-row s-check';
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = '目視';
+    row.append(badge, text('p', c.text));
+    box.appendChild(row);
+  }
 }
 
 function renderScore(result) {
@@ -746,13 +854,13 @@ async function refreshFrame(phase) {
 
   fig.innerHTML = '';
 
-  // 画像をクリックすると、動画をそのコマまで頭出しする
+  // 画像をクリックすると、動画をそのコマで止めて、そこの注意点を出す
   if (opt.mode !== 'photo') {
-    canvas.title = 'クリックすると動画がこの位置に飛びます';
+    canvas.title = 'クリックすると動画がこの位置で止まり、注意点が出ます';
     canvas.classList.add('seekable');
     canvas.addEventListener('click', () => {
-      els.video.currentTime = frames[idx].t;
-      els.videoCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      jumpToPhase(phase);
+      els.videoCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
   fig.appendChild(canvas);

@@ -658,6 +658,65 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   display: block;
 }
 
+/* ------------------- 動画をポジションで止めて注意点を出す ------------------- */
+
+.video-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.video-nav-btn {
+  padding: 9px 14px;
+  min-height: 40px;                        /* スマホで指でも押せる大きさ */
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: .85rem;
+  cursor: pointer;
+  transition: .15s;
+}
+.video-nav-btn:hover { border-color: var(--accent); }
+.video-nav-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--card);
+  font-weight: 700;
+}
+
+.video-notes { margin-top: 14px; }
+.video-notes h3 {
+  margin: 0 0 10px;
+  font-size: .95rem;
+  color: var(--accent);
+}
+.video-notes .note-row {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-left: 4px solid var(--line);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg);
+}
+.video-notes .note-row b { font-size: .9rem; }
+.video-notes .note-value {
+  display: block;
+  margin-top: 2px;
+  font-size: .8rem;
+  color: var(--ink-sub);
+}
+.video-notes .note-row p {
+  margin: 6px 0 0;
+  font-size: .85rem;
+  line-height: 1.7;
+}
+.video-notes .badge { margin-right: 8px; }
+.video-notes .s-good { border-left-color: var(--good); }
+.video-notes .s-warn { border-left-color: var(--warn); }
+.video-notes .s-bad { border-left-color: var(--bad); }
+.video-notes .s-check { border-left-color: var(--ink-sub); }
+.video-notes .s-check .badge { background: var(--ink-sub); }
+
 /* ----------------------------- レッスンの案内 ----------------------------- */
 
 .contact-card { border-color: var(--accent); }
