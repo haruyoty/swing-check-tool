@@ -136,6 +136,7 @@ function buildPhotoSlots() {
     input.addEventListener('change', e => {
       const file = e.target.files[0];
       if (file) loadPhoto(phase, file, slot);
+      e.target.value = '';                 // 同じ写真を選び直しても change が起きるように
     });
 
     const thumb = document.createElement('span');
@@ -244,6 +245,8 @@ els.dropzone.addEventListener('drop', e => {
 els.fileInput.addEventListener('change', e => {
   const file = e.target.files[0];
   if (file) loadVideo(file);
+  // 同じファイルをもう一度選んでも change が起きるように、選択を空に戻す
+  e.target.value = '';
 });
 
 /* --------------------------- カメラで撮って取り込む -----------------------
@@ -258,6 +261,13 @@ if (hasCamera) els.captureBtn.hidden = false;
 els.captureInput.addEventListener('change', e => {
   const file = e.target.files[0];
   if (file) loadVideo(file);
+  /*
+   * カメラで撮り直したときに何も起きなくなるのを防ぎます。
+   * スマホのカメラが返すファイルは毎回同じ名前になることがあり、その場合
+   * ブラウザは「選択が変わっていない」と判断して change を出しません。
+   * 受け取ったあとに選択を空へ戻しておけば、2 回目以降も必ず読み込まれます。
+   */
+  e.target.value = '';
 });
 
 function loadVideo(file) {
@@ -499,7 +509,8 @@ const NEAR_ENOUGH = 0.5;                              // 秒
 function buildVideoNav() {
   els.videoNav.innerHTML = '';
   els.videoNotes.innerHTML = '';
-  const { keys, frames, opt } = current;
+  if (!current) return;
+  const { keys, opt } = current;
   if (!keys || opt.mode === 'photo') return;
 
   for (const phase of PHASE_ORDER) {
@@ -522,6 +533,7 @@ function shortPhaseLabel(phase) {
 
 /** その位置まで動画を進めて止め、注意点を出す */
 function jumpToPhase(phase) {
+  if (!current) return;
   const { keys, frames } = current;
   if (!keys || keys[phase] === undefined) return;
   els.video.pause();
@@ -529,8 +541,13 @@ function jumpToPhase(phase) {
   showPhaseNotes(phase);
 }
 
-/** 今の再生位置にいちばん近いポジションへ切り替える */
+/**
+ * 今の再生位置にいちばん近いポジションへ切り替える。
+ * 設定画面で範囲を決めているあいだや解析中も pause / seeked は飛んでくるので、
+ * まだ診断結果がないときは何もしません（ここで落ちると解析中ずっと例外が出ます）。
+ */
 function syncPhaseToVideo() {
+  if (!current || current.opt.mode === 'photo') return;
   const { keys, frames } = current;
   if (!keys || !frames) return;
   const t = els.video.currentTime;
@@ -1204,6 +1221,11 @@ function hideError() { els.error.hidden = true; }
 
 els.resetBtn.addEventListener('click', () => {
   els.videoSlot.appendChild(els.video);              // 動画プレーヤーを設定画面に戻す
+  // 前回の結果を捨てる。残しておくと、次の動画を選んでいる最中の pause / seeked で
+  // 前のスイングの注意点に切り替わってしまいます
+  current = null;
+  els.videoNav.innerHTML = '';
+  els.videoNotes.innerHTML = '';
   els.videoCard.hidden = true;
   els.result.hidden = true;
   els.setup.hidden = false;

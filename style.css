@@ -162,6 +162,9 @@ main, .site-header, .site-footer { max-width: 780px; margin: 0 auto; }
 }
 .capture-btn::before { content: '📷'; font-size: 1.15rem; }
 .capture-btn:active { filter: brightness(.92); }
+/* display を指定したぶん、hidden 属性（ブラウザ既定の display:none）が
+   負けてしまうので、ここで明示的に打ち消します */
+.capture-btn[hidden] { display: none; }
 
 /* ----------------------------- 写真スロット ------------------------------ */
 
