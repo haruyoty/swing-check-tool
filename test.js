@@ -12,7 +12,7 @@ const A = new Function('document', src + `
   return {detectKeyFrames, measure, diagnose, scoreOne, neckLine, ballGuide, sides,
           lessonVideo, lessonCandidates, searchLessons, normalizeTitle, LESSON_CANDIDATES,
           swingCrop, CRITERIA, CLUBS, VISUAL_CHECKS, PHASE_LABELS, LESSON_QUERIES,
-          CHANNEL_VIDEOS, CHANNEL_URL, CATALOG_UPDATED, resolveCriterion};`)(null);
+          CHANNEL_VIDEOS, CHANNEL_URL, CATALOG_UPDATED, CONTACT_LINKS, resolveCriterion};`)(null);
 
 /* ---------------------------- テスト用ユーティリティ ---------------------- */
 
@@ -21,6 +21,10 @@ const PHASE_ORDER_TEST = ['address', 'takeaway', 'backswing', 'top', 'downswing'
 
 /** ランドマーク配列の複製（テスト内で姿勢をいじるとき用） */
 const cloneLms = lms => lms.map(p => Object.assign({}, p));
+
+/** 計測結果を見やすく丸める（数値でないもの＝補足文はそのまま） */
+const round3 = m => Object.fromEntries(
+  Object.entries(m).map(([k, v]) => [k, typeof v === 'number' ? +v.toFixed(3) : v]));
 
 /** 動画のキーフレームを「ポジションごとの写真」の形に組み替える */
 const asPhotos = (src, srcKeys, phases) => {
@@ -177,8 +181,7 @@ check('テークバック < バックスイング', kF.takeaway < kF.backswing, 
 
 section('2. 正面の計測値（良いスイング）');
 const mF = A.measure(fF, kF, 'right', 'front');
-console.log('  ', JSON.stringify(Object.fromEntries(
-  Object.entries(mF).map(([k, v]) => [k, +v.toFixed(3)]))));
+console.log('  ', JSON.stringify(round3(mF)));
 check('肩の傾き（右肩が下がる＝正）', mF.shoulderTilt > 0, true);
 check('トップの頭は右（正）へ', mF.headAtTop > 0, true);
 check('トップの腰は右（正）へ', mF.hipAtTop > 0, true);
@@ -219,8 +222,7 @@ const fS = buildSide(30, 0.03);
 const kS = A.detectKeyFrames(fS, 'right');
 const mS = A.measure(fS, kS, 'right', 'side');
 console.log('  ', JSON.stringify(kS));
-console.log('  ', JSON.stringify(Object.fromEntries(
-  Object.entries(mS).map(([k, v]) => [k, +v.toFixed(3)]))));
+console.log('  ', JSON.stringify(round3(mS)));
 check('後方でもトップのフレームが正しい', kS.top, 45, 2);
 check('後方でもインパクトのフレームが正しい', kS.impact, 60, 2);
 check('後方でもテンポが 2.4〜3.6', mS.tempo >= 2.4 && mS.tempo <= 3.6, true);
@@ -245,6 +247,133 @@ const s45 = buildSide(45);
 check('45度で作れば前傾角も 45°',
   A.measure(s45, A.detectKeyFrames(s45, 'right'), 'right', 'side').spineAddress, 45, 1.5);
 
+section('4-2. 後方：ダウンスイングとフォローの起き上がりを拾えるか');
+/*
+ * 合成データは胴体を固定しているので、そのままでは前傾の変化がすべて 0 になる。
+ * ここでは特定のコマだけ「起き上がった」「お尻が前に出た」形に差し替えて、
+ * 数値が正しい向き・大きさで反応するかを確かめる。
+ */
+{
+  /** idx のコマの肩まわりを動かして、前傾角を newDeg にする */
+  const tiltSpineAt = (frames, idx, newDeg) => {
+    const l = cloneLms(frames[idx].lms);
+    const hip = { x: (l[23].x + l[24].x) / 2, y: (l[23].y + l[24].y) / 2 };
+    const sh = { x: (l[11].x + l[12].x) / 2, y: (l[11].y + l[12].y) / 2 };
+    const len = Math.hypot(sh.x - hip.x, sh.y - hip.y);
+    const rad = newDeg * Math.PI / 180;
+    const dx = hip.x + len * Math.sin(rad) - sh.x;
+    const dy = hip.y - len * Math.cos(rad) - sh.y;
+    for (const i of [0, 7, 8, 11, 12, 13, 14]) l[i] = { x: l[i].x + dx, y: l[i].y + dy };
+    return { t: frames[idx].t, lms: l };
+  };
+  /** idx のコマの腰だけを dx ずらす（プラス＝ボール側） */
+  const pushHipsAt = (frames, idx, dx) => {
+    const l = cloneLms(frames[idx].lms);
+    for (const i of [23, 24]) l[i] = { x: l[i].x + dx, y: l[i].y };
+    return { t: frames[idx].t, lms: l };
+  };
+
+  // 目安（criteria.js 側を緩めたときに気づけるよう、ここで固定しておく）
+  const bandOfSide = id => A.resolveCriterion(A.CRITERIA.find(x => x.id === id), 'iron').ideal;
+  for (const id of ['spineAtTop', 'spineAtDownswing', 'spineAtImpact']) {
+    check(`${id} の目安は 8° 以内`, JSON.stringify(bandOfSide(id)), '[0,8]');
+  }
+  check('spineAtFollow の目安は他より緩い',
+    bandOfSide('spineAtFollow')[1] > bandOfSide('spineAtImpact')[1], true);
+
+  // 起き上がり：ダウンで 30°→16°（14°）、フォローで 30°→6°（24°）
+  const up = fS.slice();
+  up[kS.downswing] = tiltSpineAt(fS, kS.downswing, 16);
+  up[kS.follow] = tiltSpineAt(fS, kS.follow, 6);
+  const mUp = A.measure(up, kS, 'right', 'side');
+  check('ダウンの前傾変化を拾える', mUp.spineAtDownswing, 14, 0.5);
+  check('フォローの前傾変化を拾える', mUp.spineAtFollow, 24, 0.5);
+  check('起き上がると頭も上がる（マイナス）', mUp.headHeightAtDownswing < 0, true);
+  check('トップとインパクトは巻き込まれない',
+    Math.abs(mUp.spineAtTop) < 0.5 && Math.abs(mUp.spineAtImpact) < 0.5, true);
+
+  const dUp = A.diagnose(mUp, 'side', 'iron');
+  const at = id => dUp.items.find(i => i.id === id);
+  check('ダウンの前傾が減点される', at('spineAtDownswing').score < 100, true);
+  check('ダウンの前傾は「起き上がり」判定', at('spineAtDownswing').status, 'high');
+  check('フォローの前傾が減点される', at('spineAtFollow').score < 100, true);
+  check('フォロー 24° は目安 16° 超え', at('spineAtFollow').status, 'high');
+
+  // 同じ 14° のずれでも、フォローは目安が緩いので満点のまま
+  const keep = fS.slice();
+  keep[kS.downswing] = tiltSpineAt(fS, kS.downswing, 24);   // 6° のずれ
+  keep[kS.follow] = tiltSpineAt(fS, kS.follow, 16);         // 14° のずれ
+  const dKeep = A.diagnose(A.measure(keep, kS, 'right', 'side'), 'side', 'iron');
+  check('ダウンの 6° は目安内',
+    dKeep.items.find(i => i.id === 'spineAtDownswing').score, 100, 0);
+  check('フォローの 14° は目安内',
+    dKeep.items.find(i => i.id === 'spineAtFollow').score, 100, 0);
+
+  // お尻がボール側へ（つま先は画面右なので +x がボール側）
+  const hips = fS.slice();
+  hips[kS.downswing] = pushHipsAt(fS, kS.downswing, 0.03);
+  const mHip = A.measure(hips, kS, 'right', 'side');
+  check('ダウンでお尻が前に出ると正の値', mHip.hipToBallAtDownswing > 0.1, true);
+  check('お尻が前に出ると減点される',
+    A.diagnose(mHip, 'side', 'iron').items.find(i => i.id === 'hipToBallAtDownswing').status, 'high');
+
+  // 良いスイング（胴体が固定）ではどれも満点
+  const dGood = A.diagnose(mS, 'side', 'iron');
+  for (const id of ['spineAtDownswing', 'spineAtFollow', 'hipToBallAtDownswing', 'headHeightAtDownswing']) {
+    check(`前傾が保てていれば ${id} は満点`, dGood.items.find(i => i.id === id).score, 100, 0);
+  }
+}
+
+section('4-3. 後方：背骨と左前腕が平行か');
+/*
+ * 合成データの腕はざっくりした形なので、そのままの値には意味がない。
+ * テークバック前後のコマの前腕だけを「背骨と厳密に平行」「20°ずらす」と置き換えて、
+ * 計算が意図どおりの角度を返すかを確かめる。
+ * （中央値を取る都合で、前後 2 コマぶんまとめて置き換える必要がある）
+ */
+{
+  const SPINE = 30;                                     // buildSide(30) の前傾
+  /** 左前腕（13=肘 / 15=手首）を、垂直から deg 度傾いた線に置き換える */
+  const setForearm = (frames, idx, deg, len = 0.20) => {
+    const out = frames.slice();
+    for (let i = idx - 2; i <= idx + 2; i++) {
+      if (!out[i]) continue;
+      const l = cloneLms(out[i].lms);
+      const wrist = { x: 0.50, y: 0.60 };
+      l[15] = wrist;
+      l[13] = { x: wrist.x + Math.tan(deg * Math.PI / 180) * len, y: wrist.y - len };
+      out[i] = { t: out[i].t, lms: l };
+    }
+    return out;
+  };
+  const valueOf = frames => A.measure(frames, kS, 'right', 'side').armSpineParallel;
+
+  check('背骨と同じ傾きなら 0°', valueOf(setForearm(fS, kS.takeaway, SPINE)), 0, 0.5);
+  check('20° ずらせば 20°', valueOf(setForearm(fS, kS.takeaway, SPINE + 20)), 20, 0.5);
+  check('反対に 20° ずらしても 20°', valueOf(setForearm(fS, kS.takeaway, SPINE - 20)), 20, 0.5);
+
+  // 奥行きに潰れて前腕が短く写るコマは、角度が定まらないので測らない
+  check('前腕が短すぎるコマは測らない',
+    valueOf(setForearm(fS, kS.takeaway, SPINE, 0.02)), undefined);
+
+  // 1 コマだけ乱れても中央値で吸収する
+  {
+    const f = setForearm(fS, kS.takeaway, SPINE);
+    const l = cloneLms(f[kS.takeaway].lms);
+    l[13] = { x: l[13].x + 0.15, y: l[13].y };           // 中心のコマだけ大きく外す
+    f[kS.takeaway] = { t: f[kS.takeaway].t, lms: l };
+    check('1 コマの乱れに引っ張られない', valueOf(f), 0, 0.5);
+  }
+
+  // 採点：平行なら満点、大きくずれれば減点
+  const scoreAt = deg => A.diagnose(A.measure(setForearm(fS, kS.takeaway, deg), kS, 'right', 'side'),
+    'side', 'iron').items.find(i => i.id === 'armSpineParallel');
+  check('平行なら満点', scoreAt(SPINE).score, 100, 0);
+  check('10° のずれは目安内', scoreAt(SPINE + 10).score, 100, 0);
+  check('25° のずれは減点', scoreAt(SPINE + 25).score < 100, true);
+  check('25° のずれは「ずれている」判定', scoreAt(SPINE + 25).status, 'high');
+}
+
 section('5. 悪いスイングを減点できるか');
 const good = A.diagnose(mF, 'front', 'driver');
 const cases = [
@@ -265,21 +394,35 @@ for (const [name, opt, id] of cases) {
 section('6. 番手ごとの基準の切り替え');
 const bandOf = (id, club) =>
   A.resolveCriterion(A.CRITERIA.find(x => x.id === id), club).ideal;
-check('前傾角: ドライバーは 26〜34', JSON.stringify(bandOf('spineAddress', 'driver')), '[26,34]');
-check('前傾角: SW は 41〜49', JSON.stringify(bandOf('spineAddress', 'wedge')), '[41,49]');
+// 目安は「クラブごとの理論値 ± 6°」。中心がずれていないかを見る
+const centerOf = (id, club) => { const b = bandOf(id, club); return (b[0] + b[1]) / 2; };
+check('前傾角: 1W の中心は 30°', centerOf('spineAddress', 'driver'), 30, 0.01);
+check('前傾角: FW・UT の中心は 33°', centerOf('spineAddress', 'fwut'), 33, 0.01);
+check('前傾角: ウエッジの中心は 45°', centerOf('spineAddress', 'wedge'), 45, 0.01);
+check('前傾角: 1W は 26〜34', JSON.stringify(bandOf('spineAddress', 'driver')), '[26,34]');
+check('前傾角: ウエッジは 41〜49', JSON.stringify(bandOf('spineAddress', 'wedge')), '[41,49]');
+check('前傾角: クラブが短いほど深い',
+  centerOf('spineAddress', 'driver') < centerOf('spineAddress', 'fwut')
+  && centerOf('spineAddress', 'fwut') < centerOf('spineAddress', 'iron')
+  && centerOf('spineAddress', 'iron') < centerOf('spineAddress', 'wedge'), true);
 check('重心: ドライバーは右寄りが正解', bandOf('addressBalance', 'driver')[0] > 0, true);
 check('重心: SW は左寄りが正解', bandOf('addressBalance', 'wedge')[1] < 0, true);
-check('重心: 8番〜PW は均等', Math.abs(bandOf('addressBalance', 'shortiron')[0]) < 0.1, true);
+check('前傾角: アイアンは 5番〜PW をまとめた 33〜45',
+  JSON.stringify(bandOf('spineAddress', 'iron')), '[33,45]');
+check('前傾角: アイアンの幅が他のクラブより広い',
+  bandOf('spineAddress', 'iron')[1] - bandOf('spineAddress', 'iron')[0]
+  > bandOf('spineAddress', 'driver')[1] - bandOf('spineAddress', 'driver')[0], true);
+check('重心: アイアンは均等', Math.abs(bandOf('addressBalance', 'iron')[0]) < 0.1, true);
 check('インパクトの頭: ドライバーは右に残す', bandOf('headAtImpact', 'driver')[0] > 0, true);
-check('インパクトの頭: アイアンは戻す', bandOf('headAtImpact', 'shortiron')[0] < 0, true);
+check('インパクトの頭: アイアンは戻す', bandOf('headAtImpact', 'iron')[0] < 0, true);
 check('スタンス幅: ドライバーの方が広い',
-  bandOf('stanceWidth', 'driver')[1] > bandOf('stanceWidth', 'shortiron')[1], true);
+  bandOf('stanceWidth', 'driver')[1] > bandOf('stanceWidth', 'iron')[1], true);
 
 section('7. 同じスイングでも番手で評価が変わる');
 // 頭がアドレス位置に戻るスイング → アイアンでは満点、ドライバーでは減点
-const headIron = A.diagnose(mF, 'front', 'shortiron').items.find(i => i.id === 'headAtImpact');
+const headIron = A.diagnose(mF, 'front', 'iron').items.find(i => i.id === 'headAtImpact');
 const headDrv = A.diagnose(mF, 'front', 'driver').items.find(i => i.id === 'headAtImpact');
-check('頭が戻る → 8番〜PW では満点', headIron.score, 100, 0);
+check('頭が戻る → アイアンでは満点', headIron.score, 100, 0);
 check('頭が戻る → ドライバーでは減点', headDrv.score < 100, true);
 check('ドライバーのコメントが「突っ込み」を指摘', /突っ込/.test(headDrv.comment), true);
 
@@ -406,6 +549,19 @@ section('9-1. 符号の意味が言葉で分かるか');
   check('左右バランス: マイナスは左足寄り', /左/.test(bal.signLabels[1]), true);
 }
 
+section('9-1b. レッスンの案内リンク');
+{
+  check('案内が 1 つ以上ある', A.CONTACT_LINKS.length > 0, true);
+  for (const c of A.CONTACT_LINKS) {
+    check(`${c.title}: https で始まる`, /^https:\/\//.test(c.url), true);
+    check(`${c.title}: 説明文がある`, c.lead.length > 5, true);
+  }
+  check('ラウンドレッスンの案内がある',
+    A.CONTACT_LINKS.some(c => c.url.includes('noyamagolf.com/?p=47')), true);
+  check('ホームページの案内がある',
+    A.CONTACT_LINKS.some(c => c.url === 'https://noyamagolf.com/'), true);
+}
+
 section('9-2. チャンネル目録と検索');
 {
   console.log(`   目録 ${A.CHANNEL_VIDEOS.length} 本 / 取得日 ${A.CATALOG_UPDATED} / ${A.CHANNEL_URL}`);
@@ -449,7 +605,9 @@ section('9-3. 症状ごとに動画が見つかるか');
     }
   }
   console.log(`   ${Object.keys(A.LESSON_QUERIES).length} 症状 / のべ候補 ${total} 本`);
-  check(`候補が 1 本以下の症状がない${thin.length ? '（' + thin.join(', ') + '）' : ''}`, thin.length, 0, 0);
+  // 候補が 1 本しかない症状があってもよい。ぴったり合う動画が 1 本だけなら、
+  // 無理に別の動画を混ぜるより、その 1 本を出し続けるほうが役に立つため
+  if (thin.length) console.log(`   候補が 1 本だけの症状: ${thin.join(', ')}`);
 
   // 減点された項目には必ず動画が付く
   const bad = A.diagnose({ tempo: 9, headAtTop: 2.0, hipAtTop: 0.9, shoulderTurn: 20 }, 'front', 'driver');
@@ -504,16 +662,30 @@ section('11-2. ボール位置の目安ゾーン（アドレス画像に描く�
 {
   // 正面の合成データ: 左足首 x=0.435（目標側）、右足首 x=0.565、中央 0.500
   const A0 = fF[kF.address].lms;
-  for (const [club, expect] of [['driver', '目標寄り'], ['shortiron', 'ほぼ中央']]) {
+  for (const club of ['driver', 'iron', 'wedge']) {
     const g = A.ballGuide(A0, 'right', club);
     const mid = (g.from + g.to) / 2;
     check(`${club}: ゾーンが両足の間に収まる`, g.from > 0.3 && g.to < 0.7, true);
-    if (club === 'driver') {
-      check('driver: ゾーンが左足かかと寄り', Math.abs(mid - A0[27].x) < 0.02, true);
-      check('driver: 中央より目標側', mid < g.center, true);
-    } else {
-      check('shortiron: ゾーンがほぼ中央', Math.abs(mid - g.center), 0, 0.012);
-    }
+  }
+  {
+    const g = A.ballGuide(A0, 'right', 'driver');
+    const mid = (g.from + g.to) / 2;
+    check('driver: ゾーンが左足かかと寄り', Math.abs(mid - A0[27].x) < 0.02, true);
+    check('driver: 中央より目標側', mid < g.center, true);
+  }
+  {
+    const g = A.ballGuide(A0, 'right', 'wedge');
+    check('wedge: ゾーンがほぼ中央', Math.abs((g.from + g.to) / 2 - g.center), 0, 0.012);
+  }
+  {
+    // アイアンは 5番〜PW をまとめているので、中央から目標側までの幅を持つ
+    const g = A.ballGuide(A0, 'right', 'iron');
+    const wedge = A.ballGuide(A0, 'right', 'wedge');
+    const driver = A.ballGuide(A0, 'right', 'driver');
+    check('iron: ウエッジより帯が広い',
+      Math.abs(g.to - g.from) > Math.abs(wedge.to - wedge.from), true);
+    check('iron: 中央側の端がウエッジと同じ', Math.abs(g.from - wedge.from) < 0.001, true);
+    check('iron: ドライバーより手前で終わる', Math.abs(g.to - g.center) < Math.abs(driver.to - driver.center), true);
   }
   // 左打ちでは左右が反転する
   const gR = A.ballGuide(A0, 'right', 'driver');
@@ -683,10 +855,54 @@ section('12. 写真モード（ポジションが一部だけでも動くか）'
   const { frames, keys } = asPhotos(fF, kF, all);
   const met = A.measure(frames, keys, 'right', 'front');
   for (const k of Object.keys(mF)) {
-    if (k === 'tempo') continue;
+    if (k === 'tempo' || k === 'tempoDetail') continue;   // テンポは写真では出ない
     check(`写真7枚: ${k} が動画と一致`, met[k], mF[k], 0.001);
   }
   check('写真7枚でもテンポだけは出ない', met.tempo, undefined);
+}
+
+section('12-2. 画面まわり（app.js と index.html の突き合わせ）');
+/*
+ * app.js は id で要素を引くので、index.html 側の id を書き忘れると
+ * その場では気づかず、結果表示のときに初めて落ちる。ここで先に検出する。
+ */
+{
+  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(dir, 'app.js'), 'utf8');
+  const htmlIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
+
+  const start = app.indexOf('const els = {');
+  const block = app.slice(start, app.indexOf('};', start));
+  const els = [...block.matchAll(/(\w+):\s*\$\('([^']+)'\)/g)].map(m => ({ key: m[1], id: m[2] }));
+  check('els が読み取れる', els.length > 20, true);
+
+  const missing = els.filter(e => !htmlIds.has(e.id)).map(e => `${e.key}→#${e.id}`);
+  check(`els の id がすべて index.html にある${missing.length ? '（欠け: ' + missing.join(', ') + '）' : ''}`,
+    missing.length, 0, 0);
+
+  const keys = new Set(els.map(e => e.key));
+  const undef = [...new Set([...app.matchAll(/els\.(\w+)/g)].map(m => m[1]))].filter(k => !keys.has(k));
+  check(`els.○○ の参照がすべて定義済み${undef.length ? '（未定義: ' + undef.join(', ') + '）' : ''}`,
+    undef.length, 0, 0);
+
+  // アドレス基準表は撮影角度で出し分ける
+  const rows = [...app.matchAll(/\{ label: '([^']+)', field: '\w+', view: '(front|side)'/g)]
+    .map(m => [m[1], m[2]]);
+  check('アドレス基準表の行数', rows.length, 5, 0);
+  check('正面で出る行', rows.filter(r => r[1] === 'front').length, 3, 0);
+  check('後方で出る行', rows.filter(r => r[1] === 'side').length, 2, 0);
+  check('前傾角は後方', (rows.find(r => r[0] === '前傾角') || [])[1], 'side');
+  check('ボールの位置は正面', (rows.find(r => r[0] === 'ボールの位置') || [])[1], 'front');
+  check('撮影角度で絞り込んでいる',
+    /REF_ROWS\.filter\(r => r\.view === opt\.view\)/.test(app), true);
+
+  // 「優先して直したい項目」がスコアのすぐ下にあること
+  const iPri = html.indexOf('id="priorities"');
+  const iVideo = html.indexOf('id="videoCard"');
+  const iScore = html.indexOf('id="scoreNum"');
+  check('優先して直したい項目がある', iPri > 0, true);
+  check('優先項目はスコアより下', iPri > iScore, true);
+  check('優先項目は動画カードより上', iPri < iVideo, true);
 }
 
 section('13. スイング前に余計な動きがある動画');
@@ -852,3 +1068,4 @@ section('14. 骨格検出が乱れたフレームに引っ張られないか');
 
 console.log(`\n────────────────\n成功 ${pass} / 失敗 ${fail}\n`);
 process.exit(fail ? 1 : 0);
+

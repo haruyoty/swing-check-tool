@@ -49,7 +49,17 @@ function searchLessons(words, limit) {
   }
 
   hits.sort((a, b) => b.score - a.score || a.order - b.order);
-  return hits.slice(0, limit || 6);
+
+  /*
+   * 弱い当たりを落とします。キーワードのうち軽い語だけがかすった動画は、
+   * その症状の話ではないことが多く、出すとかえって混乱します
+   * （例：「肩の回転不足」に対して「スイングの始動は肩から？腰から？」）。
+   * いちばん良く当たった動画の半分に届かないものは候補から外します。
+   */
+  const best = hits.length ? hits[0].score : 0;
+  const strong = hits.filter(h => h.score >= best * 0.5);
+
+  return strong.slice(0, limit || 6);
 }
 
 /**

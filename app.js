@@ -36,10 +36,14 @@ const els = {
   summaryBody: $('summaryBody'),
   modeNote: $('modeNote'),
   priorities: $('priorities'),
+  contactLinks: $('contactLinks'),
+  contactPhoto: $('contactPhoto'),
+  contactPhotoImg: $('contactPhotoImg'),
   lessonCard: $('lessonCard'),
   lessonFor: $('lessonFor'),
   lessonHolder: $('lessonHolder'),
   clubName: $('clubName'),
+  refNote: $('refNote'),
   refTable: $('refTable'),
   refFrame: $('refFrame'),
   wholeItems: $('wholeItems'),
@@ -420,9 +424,39 @@ async function renderResult(result, frames, keys, opt) {
   renderModeNote(opt, keys, result);
   renderPriorities(result);
   renderLesson(result);
+  renderContacts();
   await renderReference(opt.club, result, opt, keys, frames);
   showSwingVideo(opt);
   await renderPhases(result, keys, opt);
+}
+
+/** レッスンの案内。中身は criteria.js の CONTACT_LINKS で差し替えられます */
+function renderContacts() {
+  if (els.contactLinks.children.length) return;      // 一度だけ作ればよい
+
+  // 顔写真。ファイル名は index.html の #contactPhotoImg で指定しています。
+  // 読み込めなかったときは枠ごと出しません（写真を差し替え中でも画面が崩れないように）
+  const img = els.contactPhotoImg;
+  const show = () => { els.contactPhoto.hidden = false; };
+  const hide = () => { els.contactPhoto.hidden = true; };
+  if (img.complete) { img.naturalWidth ? show() : hide(); }
+  img.addEventListener('load', show);
+  img.addEventListener('error', hide);
+
+  for (const c of CONTACT_LINKS) {
+    const a = document.createElement('a');
+    a.className = 'contact-link';
+    a.href = c.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    const lead = text('span', c.lead);
+    lead.className = 'contact-lead';
+    // 押せる場所だと一目で分かるように、ボタン風の行を必ず付けます
+    const cta = text('span', 'ページを開く');
+    cta.className = 'contact-cta';
+    a.append(text('strong', c.title), lead, cta);
+    els.contactLinks.appendChild(a);
+  }
 }
 
 /** キーフレームを動かしたあと、診断し直せることを知らせる */
@@ -539,13 +573,21 @@ function renderLesson(result) {
 }
 
 /* アドレス基準表の各行と、それを裏づける計測項目の対応 */
+/* view はその項目を確かめられるカメラの位置。撮った角度に合う行だけを出します。
+ * ボールの位置は帯を正面のアドレス画像にだけ描いているので front です */
 const REF_ROWS = [
-  { label: 'ボールの位置', field: 'ball', ids: [] },
-  { label: 'スタンスの幅', field: 'stance', ids: ['stanceWidth'] },
-  { label: '前傾角', field: 'spine', ids: ['spineAddress'] },
-  { label: '左右の重心', field: 'balance', ids: ['addressBalance'] },
-  { label: '手元の位置', field: 'hands', ids: ['handPosSide', 'handDistance'] }
+  { label: 'ボールの位置', field: 'ball', view: 'front', ids: [] },
+  { label: 'スタンスの幅', field: 'stance', view: 'front', ids: ['stanceWidth'] },
+  { label: '左右の重心', field: 'balance', view: 'front', ids: ['addressBalance'] },
+  { label: '前傾角', field: 'spine', view: 'side', ids: ['spineAddress'] },
+  { label: '手元の位置', field: 'hands', view: 'side', ids: ['handPosSide', 'handDistance'] }
 ];
+
+/* 角度を変えて撮ると出る項目の案内文（表から消えた行の行き先を示すため） */
+const REF_NOTE = {
+  front: '正面から確かめられる項目だけを出しています。前傾角と手元の位置は、後方から撮ると出ます。',
+  side: '後方から確かめられる項目だけを出しています。ボールの位置・スタンスの幅・左右の重心は、正面から撮ると出ます。'
+};
 
 /**
  * 番手ごとのアドレス基準を、実際の計測結果と並べて表示する。
@@ -579,7 +621,10 @@ async function renderReference(club, result, opt, keys, frames) {
   head.append(text('th', ''), text('th', '目安'), text('th', 'あなたのアドレス'));
   els.refTable.appendChild(head);
 
-  for (const row of REF_ROWS) {
+  els.refNote.textContent =
+    `このクラブで構えるときの目安と、実際のアドレスを並べています。${REF_NOTE[opt.view] || ''}`;
+
+  for (const row of REF_ROWS.filter(r => r.view === opt.view)) {
     const tr = document.createElement('tr');
     tr.append(text('th', row.label), text('td', c[row.field]));
 
@@ -599,11 +644,8 @@ async function renderReference(club, result, opt, keys, frames) {
         td.appendChild(line);
       }
     } else if (row.ids.length) {
-      // この撮影角度では測れない項目
-      const need = row.ids
-        .map(id => (CRITERIA.find(c2 => c2.id === id) || {}).view)
-        .some(v => v === 'side') ? '後方（飛球線の後ろ）' : '正面';
-      td.appendChild(text('span', `${need}から撮ると自動で判定します`));
+      // 角度は合っているのに値が出なかった（骨格が取れなかった等）
+      td.appendChild(text('span', 'この映像からは判定できませんでした'));
       td.className = 'ref-na';
     } else {
       td.appendChild(text('span', 'アドレス画像の緑の帯でご確認ください（ボールは検出できません）'));
@@ -807,6 +849,12 @@ function buildItem(item) {
   fill.style.width = item.score + '%';
   gauge.appendChild(fill);
   div.append(gauge);
+
+  if (item.detail) {
+    const d = text('p', item.detail);
+    d.className = 'item-dir';
+    div.append(d);
+  }
 
   if (item.dir) {
     const dir = text('p', item.dir);

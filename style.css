@@ -658,6 +658,93 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   display: block;
 }
 
+/* ----------------------------- レッスンの案内 ----------------------------- */
+
+.contact-card { border-color: var(--accent); }
+.contact-card h2 { color: var(--accent); }
+
+/* 顔写真とご案内リンクを横並びに。狭い画面では写真を上に回します */
+.contact-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+.contact-body > div { flex: 1; min-width: 0; }
+.contact-body .contact-link:first-child { margin-top: 0; }
+
+.contact-photo {
+  flex: 0 0 130px;
+  margin: 0;
+}
+.contact-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+.contact-photo figcaption {
+  margin-top: 6px;
+  text-align: center;
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.contact-photo figcaption .role {
+  display: block;
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--ink-sub);
+}
+
+@media (max-width: 560px) {
+  .contact-body { display: block; }
+  .contact-photo { width: 110px; margin: 0 auto 12px; }
+}
+
+.contact-link {
+  display: block;
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--accent-soft);
+  transition: .15s;
+}
+.contact-link:hover { background: var(--accent); }
+/* ダークモードではアクセントが明るい緑になるので、白ではなくカードの色を敷きます */
+.contact-link:hover strong,
+.contact-link:hover .contact-lead { color: var(--card); }
+.contact-link strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.contact-link strong::after { content: ' ↗'; font-size: .8em; }
+.contact-lead {
+  display: block;
+  font-size: .85rem;
+  color: var(--ink-sub);
+  line-height: 1.6;
+}
+
+/* リンクだと一目で分かるボタン風の行 */
+.contact-cta {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--card);
+  font-size: .85rem;
+  font-weight: 700;
+}
+.contact-cta::after { content: ' →'; }
+.contact-link:hover .contact-cta { background: var(--card); color: var(--accent); }
+
 .lesson-link {
   display: inline-block;
   margin-top: 8px;

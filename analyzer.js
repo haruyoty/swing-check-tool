@@ -79,33 +79,38 @@ function tiltFromVertical(lower, upper, signDir = 1) {
 }
 
 /**
- * 肘の角度を、前後数コマの中央値で求める。
+ * 骨格から求めた値を、前後数コマの中央値にならす。
  *
- * 手首と肘の検出は、速く動くコマでは大きく揺れます。実測では、ずっと伸びている
+ * 手首や肘の検出は、速く動くコマでは大きく揺れます。実測では、ずっと伸びている
  * 腕なのに 145〜170° の範囲で 1 コマごとに散りました。1 コマだけを見ると、
- * たまたま低い値のコマに当たって「曲がっている」と誤判定します。
+ * たまたま外れたコマに当たって誤判定します。
+ *
+ * 前後のコマを混ぜてよいのは、時間的に隣り合っている場合だけ。写真モードでは
+ * 隣が「別のポジションの写真」なので、時刻が動かないことで見分けて除きます。
  */
-function medianElbow(frames, index, side, conv) {
+function medianOverFrames(frames, index, valueAt) {
   const center = frames[index];
   if (!center || !center.lms) return NaN;
 
-  const angleAt = p => jointAngle(conv(p[side.shoulder]), conv(p[side.elbow]), conv(p[side.wrist]));
-  const vals = [angleAt(center.lms)].filter(v => !isNaN(v));
-
-  // 前後のコマを混ぜてよいのは、時間的に隣り合っている場合だけ。写真モードでは
-  // 隣が「別のポジションの写真」なので、時刻が動かないことで見分けて除きます。
+  const vals = [valueAt(center.lms)].filter(v => !isNaN(v));
   for (let i = index - 2; i <= index + 2; i++) {
     if (i === index) continue;
     const f = frames[i];
     if (!f || !f.lms) continue;
     const dt = Math.abs(f.t - center.t);
     if (dt <= 0 || dt > 0.2) continue;
-    const a = angleAt(f.lms);
-    if (!isNaN(a)) vals.push(a);
+    const v = valueAt(f.lms);
+    if (!isNaN(v)) vals.push(v);
   }
   if (!vals.length) return NaN;
   vals.sort((a, b) => a - b);
   return vals[Math.floor(vals.length / 2)];
+}
+
+/** 肘の角度を、前後数コマの中央値で求める */
+function medianElbow(frames, index, side, conv) {
+  return medianOverFrames(frames, index,
+    p => jointAngle(conv(p[side.shoulder]), conv(p[side.elbow]), conv(p[side.wrist])));
 }
 
 /** 直線 a→b から点 p までの距離 */
@@ -519,7 +524,11 @@ function measure(frames, keys, handedness, view, aspect) {
   if (T && I) {
     const back = frames[keys.top].t - frames[keys.address].t;
     const down = frames[keys.impact].t - frames[keys.top].t;
-    if (down > 0 && back > 0) m.tempo = back / down;
+    if (down > 0 && back > 0) {
+      m.tempo = back / down;
+      // 元になった時間も出す。数値だけだと納得しづらいので確かめられるように
+      m.tempoDetail = `バックスイング ${back.toFixed(2)} 秒 ／ ダウンスイング ${down.toFixed(2)} 秒`;
+    }
   }
 
   /* --------------------------- 正面からの計測 --------------------------- */
@@ -538,6 +547,13 @@ function measure(frames, keys, handedness, view, aspect) {
       Math.abs(ac(A[S.lead.shoulder]).x - ac(A[S.trail.shoulder]).x)
     ));
 
+    // テークバック（シャフトが水平）でのチェック
+    const TB = at(keys.takeaway);
+    if (TB) {
+      m.hipAtTakeaway = (hipC(TB).x - hipC(A).x) * trailSign / torso;
+      m.headAtTakeaway = (TB[LM.nose].x - A[LM.nose].x) * trailSign / headW;
+    }
+
     // 左腕が水平になったところ（バックスイングの途中）でのチェック
     if (B) {
       m.hipAtBackswing = (hipC(B).x - hipC(A).x) * trailSign / torso;
@@ -553,10 +569,6 @@ function measure(frames, keys, handedness, view, aspect) {
       m.hipAtTop = (hipC(T).x - hipC(A).x) * trailSign / torso;
       m.headAtTop = (T[LM.nose].x - A[LM.nose].x) * trailSign / headW;
 
-      // トップで左腕が体を横切って右側まで来ているか。
-      // 後方からは左右が奥行き方向になって読み取れないので、正面から測ります
-      m.leadArmAcross =
-        (T[S.lead.wrist].x - mid(shoulderC(T), hipC(T)).x) * trailSign / torso;
 
       if (D) m.hipDownswing = (hipC(D).x - hipC(T).x) * targetSign / torso;
     }
@@ -568,6 +580,18 @@ function measure(frames, keys, handedness, view, aspect) {
       // インパクトのリード脚：膝が目標方向に出ているとプラス
       m.leadLegImpact = tiltFromVertical(ac(I[S.lead.ankle]), ac(I[S.lead.knee]), targetSign);
     }
+
+    /*
+     * 「切り返しは下半身が先に動く」「お腹は左を向き、胸はボールのほうを向く」も
+     * 数値で出せないか試しましたが、どちらも見送りました。
+     *   ・腰と肩の動き出しの時間差 … 肩の中心は切り返しでほとんど横に動かず
+     *     （回るだけなので）、動き出した時刻を安定して拾えません。
+     *   ・腰と肩の開き具合の差 … 正面から見た幅の縮みで求まりますが、肩が
+     *     真横を向きかけていると比が跳ね上がり、値が信用できません。
+     * どちらも VISUAL_CHECKS（目視チェック）に回しています。下半身から
+     * 切り返せているかは hipDownswing（左腕が水平に戻ったときの腰の移動）で
+     * 見てください。
+     */
 
     if (W) m.hipAtFollow = (hipC(W).x - hipC(A).x) * targetSign / torso;
 
@@ -586,9 +610,49 @@ function measure(frames, keys, handedness, view, aspect) {
     const spineA = spine(A);
     m.spineAddress = Math.abs(spineA);
     if (T) m.spineAtTop = Math.abs(spine(T) - spineA);
+    if (D) m.spineAtDownswing = Math.abs(spine(D) - spineA);
     if (I) m.spineAtImpact = Math.abs(spine(I) - spineA);
+    // フォローは体が起き上がりながら回っていく途中なので、多少のずれは自然。
+    // 基準は他のポジションより緩めにしてあります（criteria.js 側）
+    if (W) m.spineAtFollow = Math.abs(spine(W) - spineA);
 
     m.handPosSide = (handC(A).x - shoulderC(A).x) * frontSign / torso;
+
+    /*
+     * テークバックで、背骨のラインと「左肘〜左手首」のラインが平行か。
+     * どちらも下から上へ向かうベクトル（腰→肩、手首→肘）にそろえて傾きを出し、
+     * その差の大きさを返します。0° なら平行。
+     *
+     * 前腕は短いうえに、後方から見ると奥行き方向に潰れて写ります。1 コマの値は
+     * 揺れるので前後のコマの中央値を取り、潰れすぎているコマ（画面上の長さが
+     * 体格の 15% 未満）は角度が定まらないので使いません。
+     */
+    if (keys.takeaway !== undefined) {
+      const diffAt = p => {
+        const wrist = ac(p[S.lead.wrist]), elbow = ac(p[S.lead.elbow]);
+        if (Math.hypot(elbow.x - wrist.x, elbow.y - wrist.y) < torso * 0.15) return NaN;
+        return tiltFromVertical(wrist, elbow, frontSign)
+          - tiltFromVertical(ac(hipC(p)), ac(shoulderC(p)), frontSign);
+      };
+      const d = medianOverFrames(frames, keys.takeaway, diffAt);
+      if (!isNaN(d)) m.armSpineParallel = Math.abs(d);
+    }
+
+    // トップでお尻（お腹）がボール側に出ていないか。
+    // 前に出ると前傾が保てず、頭が上がって起き上がる原因になります
+    if (T) m.hipToBallAtTop = (hipC(T).x - hipC(A).x) * frontSign / torso;
+
+    // ダウンスイングの途中とインパクトでも同じことを見ます。「お腹を前に出さない」。
+    // 前に出ると前傾が起きて、クラブがインサイドから降りすぎます
+    if (D) m.hipToBallAtDownswing = (hipC(D).x - hipC(A).x) * frontSign / torso;
+    if (I) m.hipToBallAtImpact = (hipC(I).x - hipC(A).x) * frontSign / torso;
+
+    // ダウンスイングで頭が起き上がっていないか（上下だけを見ます）
+    if (D) m.headHeightAtDownswing = (D[LM.nose].y - A[LM.nose].y) / torso;
+
+    // トップで左腕が右肩を横切っているか。
+    // 後方から見て、左手が右肩よりボール側に残っていれば横切れていません
+    if (T) m.leadArmAcross = (T[S.lead.wrist].x - T[S.trail.shoulder].x) * frontSign / torso;
 
     // フィニッシュ：左肘が両肩を結んだライン上にあるか。
     // 肩がこちらを向いて重なってしまうと線の向きが定まらないので、その場合は測りません
@@ -616,6 +680,11 @@ function measure(frames, keys, handedness, view, aspect) {
   }
 
   /* ------------------------ どちらの撮影でも取れる ---------------------- */
+  // トップで頭の高さがアドレスから変わっていないか。
+  // 上下は正面からも後方からも同じように読めるので、どちらの撮影でも測ります。
+  // 頭幅は後方から見ると両耳が重なって当てにならないので、体の長さで割ります
+  if (T) m.headHeightAtTop = (T[LM.nose].y - A[LM.nose].y) / torso;
+
   if (W) m.trailElbowFollow = medianElbow(frames, keys.follow, S.trail, ac);
 
   // フィニッシュの右足は「かかとからつま先が地面と垂直」かを見ます。
@@ -745,8 +814,12 @@ function diagnose(metrics, view, club) {
     const status = score === 100 ? 'good' : (value > c.ideal[1] ? 'high' : 'low');
     const comment = status === 'good' ? c.good : (c[status] || c.high || c.low);
 
+    // <id>Detail という文字列があれば、値の下に添える補足として渡す
+    const detail = metrics[c.id + 'Detail'];
+
     items.push({
       id: c.id, label: c.label, phase: c.phase, unit: c.unit, dir: c.dir,
+      detail: typeof detail === 'string' ? detail : null,
       signLabels: c.signLabels, weight: c.weight, ideal: c.ideal,
       value, score, status, comment,
       drill: status === 'good' ? null : c.drill

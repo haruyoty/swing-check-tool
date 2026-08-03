@@ -10,7 +10,7 @@
 
 <header class="site-header">
   <h1>ゴルフスイング診断ツール</h1>
-  <p class="lead">スイング動画をアップロードすると、骨格を自動で検出して 10 項目を採点します。動画はブラウザの中だけで処理され、どこにも送信されません。</p>
+  <p class="lead">スイング動画をアップロードすると、骨格を自動で検出して採点します（正面は 24 項目、後方は 19 項目）。動画はブラウザの中だけで処理され、どこにも送信されません。</p>
 </header>
 
 <main>
@@ -34,11 +34,10 @@
 
       <div class="opt-group">
         <span class="opt-label">使用クラブ</span>
-        <label class="chip"><input type="radio" name="club" value="driver" checked><span>ドライバー</span></label>
+        <label class="chip"><input type="radio" name="club" value="driver" checked><span>1W</span></label>
         <label class="chip"><input type="radio" name="club" value="fwut"><span>FW・UT</span></label>
-        <label class="chip"><input type="radio" name="club" value="midiron"><span>5〜7番</span></label>
-        <label class="chip"><input type="radio" name="club" value="shortiron"><span>8番〜PW</span></label>
-        <label class="chip"><input type="radio" name="club" value="wedge"><span>アプローチ・SW</span></label>
+        <label class="chip"><input type="radio" name="club" value="iron"><span>アイアン</span></label>
+        <label class="chip"><input type="radio" name="club" value="wedge"><span>ウエッジ</span></label>
       </div>
     </div>
 
@@ -122,6 +121,11 @@
 
     <p class="mode-note" id="modeNote" hidden></p>
 
+    <div class="card">
+      <h2>優先して直したい項目</h2>
+      <ol class="priorities" id="priorities"></ol>
+    </div>
+
     <div class="card" id="videoCard" hidden>
       <h2>スイング動画</h2>
       <p class="note">各ポジションの画像をクリックすると、動画がその位置まで飛びます。</p>
@@ -129,13 +133,8 @@
     </div>
 
     <div class="card">
-      <h2>優先して直したい項目</h2>
-      <ol class="priorities" id="priorities"></ol>
-    </div>
-
-    <div class="card">
       <h2><span id="clubName"></span> のアドレス基準</h2>
-      <p class="note">この番手で構えるときの目安と、実際のアドレスを並べています。</p>
+      <p class="note" id="refNote"></p>
       <div class="ref-body">
         <figure class="frame" id="refFrame"></figure>
         <table class="ref-table" id="refTable"></table>
@@ -159,6 +158,18 @@
       <h2>今回のおすすめレッスン動画</h2>
       <p class="note" id="lessonFor"></p>
       <div id="lessonHolder"></div>
+    </div>
+
+    <div class="card contact-card">
+      <h2>レッスンのご案内</h2>
+      <div class="contact-body">
+        <!-- 写真ファイルが無いときは、この figure ごと消します（app.js） -->
+        <figure class="contact-photo" id="contactPhoto" hidden>
+          <img id="contactPhotoImg" src="noyama2.png" alt="野山佳治">
+          <figcaption><span class="role">ティーチングプロ</span>野山 佳治</figcaption>
+        </figure>
+        <div id="contactLinks"></div>
+      </div>
     </div>
 
     <button id="resetBtn" class="secondary">別の動画を診断する</button>
