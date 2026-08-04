@@ -24,6 +24,14 @@ const els = {
   videoSlot: $('videoSlot'),
   videoCard: $('videoCard'),
   videoHolder: $('videoHolder'),
+  videoOverlay: $('videoOverlay'),
+  guideToggle: $('guideToggle'),
+  guideEdit: $('guideEdit'),
+  guideAdd: $('guideAdd'),
+  guideDel: $('guideDel'),
+  guideReset: $('guideReset'),
+  replayBtn: $('replayBtn'),
+  tourBtn: $('tourBtn'),
   videoNav: $('videoNav'),
   videoNotes: $('videoNotes'),
   rangeBox: $('rangeBox'),
@@ -44,10 +52,6 @@ const els = {
   lessonCard: $('lessonCard'),
   lessonFor: $('lessonFor'),
   lessonHolder: $('lessonHolder'),
-  clubName: $('clubName'),
-  refNote: $('refNote'),
-  refTable: $('refTable'),
-  refFrame: $('refFrame'),
   wholeItems: $('wholeItems'),
   rediagnoseBox: $('rediagnoseBox'),
   rediagnoseBtn: $('rediagnoseBtn'),
@@ -335,6 +339,9 @@ async function run() {
     els.result.hidden = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
+    // 赤い線を入れたまま、まず 1 回スローで流す（終わるとアドレスで止まります）
+    slowReview();
+
   } catch (err) {
     els.progress.hidden = true;
     updateAnalyzeButton();
@@ -423,8 +430,12 @@ async function getPose() {
 /* ------------------------------- 結果表示 -------------------------------- */
 
 async function renderResult(result, frames, keys, opt) {
+  // 線を手で直していたら、診断し直しても引き継ぐ
+  const keptGuides = current && current.guides;
   current = { frames, keys, opt, lastResult: result };
   setDirty(false);
+  if (keptGuides) { current.guides = keptGuides; current.selectedGuide = null; }
+  else initGuides();
 
   // 切り出し範囲は全ポジションで共通。アドレス基準表の画像でも使うので先に決める
   if (opt.mode !== 'photo') {
@@ -437,7 +448,6 @@ async function renderResult(result, frames, keys, opt) {
   renderPriorities(result);
   renderLesson(result);
   renderContacts();
-  await renderReference(opt.club, result, opt, keys, frames);
   showSwingVideo(opt);
   await renderPhases(result, keys, opt);
 }
@@ -492,10 +502,322 @@ function frameAspect(mode, frames, keys) {
 /** 解析後も動画を見られるように、結果側へ動画プレーヤーを移す */
 function showSwingVideo(opt) {
   if (opt.mode === 'photo') { els.videoCard.hidden = true; return; }
-  els.videoHolder.appendChild(els.video);
+  // canvas より前に入れて、赤い線が映像の上に重なるようにする
+  els.videoHolder.insertBefore(els.video, els.videoOverlay);
   els.videoCard.hidden = false;
   buildVideoNav();
+  drawGuides();
 }
+
+/* ------------------------ 動画に重ねる赤いガイド線 ------------------------ */
+
+/*
+ * 線は「アドレスの骨格から 1 回だけ」引いて、そのまま固定します。
+ * スイング中の骨格に追わせると線が体と一緒に動いてしまい、クラブが
+ * その線をどう通ったかが読めなくなるためです。
+ *
+ * 骨格検出のズレで線が合わないことがあるので、手で動かせるようにしています。
+ * current.guides に正規化座標（x は幅の割合、y は高さの割合）で持ちます。
+ */
+let guideEditing = false;
+let guideDrag = null;
+
+/** アドレスのコマから線を引き直す（診断のたびに呼ぶ） */
+function initGuides() {
+  if (!current) return;
+  const { frames, keys, opt } = current;
+  const a = keys.address !== undefined && frames[keys.address] && frames[keys.address].lms;
+  current.guides = a ? guideLines(a, opt.hand, opt.view, opt.club, opt.aspect) : [];
+  current.selectedGuide = null;
+}
+
+function drawGuides() {
+  const cv = els.videoOverlay;
+  if (!current || !current.opt || current.opt.mode === 'photo' || els.videoCard.hidden) return;
+
+  const w = els.video.clientWidth, h = els.video.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  if (!els.guideToggle.checked) return;
+
+  const lines = current.guides || [];
+  ctx.save();
+  ctx.lineCap = 'round';
+  const lw = Math.max(2, Math.round(w / 220));
+  lines.forEach((l, i) => {
+    const selected = guideEditing && i === current.selectedGuide;
+    ctx.strokeStyle = selected ? '#ffb020' : '#e5322d';
+    ctx.lineWidth = selected ? lw + 2 : lw;
+    ctx.beginPath();
+    ctx.moveTo(l.from.x * w, l.from.y * h);
+    ctx.lineTo(l.to.x * w, l.to.y * h);
+    ctx.stroke();
+
+    // 手で動かせるときは、端に丸いつまみを出す
+    if (guideEditing) {
+      ctx.fillStyle = selected ? '#ffb020' : '#e5322d';
+      for (const p of [l.from, l.to]) {
+        ctx.beginPath();
+        ctx.arc(p.x * w, p.y * h, lw + 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  });
+  ctx.restore();
+}
+
+els.video.addEventListener('loadedmetadata', drawGuides);
+window.addEventListener('resize', drawGuides);
+els.guideToggle.addEventListener('change', drawGuides);
+
+/** 再生速度を変えて、ボタンの見た目もそろえる */
+function setSpeed(rate) {
+  els.video.playbackRate = rate;
+  for (const o of document.querySelectorAll('.speed-btn')) {
+    o.classList.toggle('active', Number(o.dataset.rate) === rate);
+  }
+}
+for (const b of document.querySelectorAll('.speed-btn')) {
+  b.addEventListener('click', () => setSpeed(Number(b.dataset.rate)));
+}
+
+/* -------------------- 診断のあとに一度スローで見せる -------------------- */
+
+/*
+ * 結果が出たら、赤い線を入れたまま 0.5 倍速でスイングを 1 回流し、
+ * 終わったらアドレスで止めます。そのあとはポジションのボタンで見ていけます。
+ */
+let reviewTimer = 0;
+function stopSlowReview() { if (reviewTimer) { clearInterval(reviewTimer); reviewTimer = 0; } }
+
+async function slowReview() {
+  stopSlowReview();
+  stopTour();
+  if (!current || current.opt.mode === 'photo') return;
+  const { frames, keys } = current;
+  if (keys.address === undefined) return;
+
+  setSpeed(0.5);
+  /*
+   * 流すのはアドレスからフィニッシュまでだけ。前後を足すと、構え直しや
+   * 振り終わったあとの余計な動きまで見せることになるためです。
+   */
+  const last = keys.finish !== undefined ? keys.finish : keys.impact;
+  const start = frames[keys.address].t;
+  const end = last !== undefined ? frames[last].t : els.video.duration;
+  if (!(end > start)) { jumpToPhase('address'); return; }
+
+  await seekTo(els.video, start);
+  drawGuides();
+  try {
+    await els.video.play();
+  } catch (e) {
+    jumpToPhase('address');                 // 自動再生が止められた端末ではアドレスで待つ
+    return;
+  }
+  reviewTimer = setInterval(() => {
+    if (els.video.paused) { stopSlowReview(); return; }
+    if (els.video.currentTime >= end) { stopSlowReview(); jumpToPhase('address'); }
+  }, 60);
+}
+els.replayBtn.addEventListener('click', () => { stopTour(); slowReview(); });
+
+/* ---------------------- コメント付きスロー（自動で解説） ---------------------- */
+
+/*
+ * 0.5 倍速で流しながら、各ポジションで止まって右側にそのポジションの
+ * 注意点を出します。読み終わるころに次のポジションへ進みます。
+ */
+const TOUR_PAUSE = 8000;                       // 各ポジションで止まる時間（ミリ秒）
+let tourToken = 0;
+
+function stopTour() {
+  tourToken++;
+  els.video.pause();
+  els.tourBtn.classList.remove('active');
+  els.tourBtn.textContent = 'コメント付きスロー';
+}
+
+/** 指定の時刻まで再生して止める。途中で中断されたら false */
+function playUntil(t, token) {
+  return new Promise(resolve => {
+    const tick = () => {
+      if (token !== tourToken) { clearInterval(id); resolve(false); return; }
+      if (els.video.paused || els.video.currentTime >= t) {
+        clearInterval(id);
+        els.video.pause();
+        resolve(token === tourToken);
+      }
+    };
+    const id = setInterval(tick, 50);
+    els.video.play().catch(() => { clearInterval(id); resolve(false); });
+  });
+}
+
+const waitMs = (ms, token) => new Promise(r => setTimeout(() => r(token === tourToken), ms));
+
+async function commentedTour() {
+  stopSlowReview();
+  stopTour();
+  if (!current || current.opt.mode === 'photo') return;
+  const { frames, keys } = current;
+  const order = PHASE_ORDER.filter(p => keys[p] !== undefined);
+  if (order.length < 2) return;
+
+  const token = ++tourToken;
+  els.tourBtn.classList.add('active');
+  els.tourBtn.textContent = '止める';
+  setSpeed(0.5);
+
+  await seekTo(els.video, frames[keys[order[0]]].t);
+  if (token !== tourToken) return;
+  showPhaseNotes(order[0]);
+  drawGuides();
+  if (!await waitMs(TOUR_PAUSE, token)) return;
+
+  for (let i = 1; i < order.length; i++) {
+    if (!await playUntil(frames[keys[order[i]]].t, token)) return;
+    showPhaseNotes(order[i]);
+    drawGuides();
+    if (!await waitMs(TOUR_PAUSE, token)) return;
+  }
+  stopTour();
+  jumpToPhase(order[0]);
+}
+
+els.tourBtn.addEventListener('click', () => {
+  if (els.tourBtn.classList.contains('active')) stopTour();
+  else commentedTour();
+});
+
+/* ---------------------------- 線を手で動かす ---------------------------- */
+
+/** 画面上の座標（0〜1）を返す */
+function guidePoint(e) {
+  const r = els.videoOverlay.getBoundingClientRect();
+  return {
+    x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+    y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+  };
+}
+
+/** その位置にいちばん近い線と、つかんだ場所（端か、線そのものか）を返す */
+function guideHit(p) {
+  const w = els.videoOverlay.width || 1, h = els.videoOverlay.height || 1;
+  const px = { x: p.x * w, y: p.y * h };
+  const grab = Math.max(14, w / 22);            // 指でもつまめる大きさ
+  let best = null;
+
+  (current.guides || []).forEach((l, i) => {
+    const a = { x: l.from.x * w, y: l.from.y * h };
+    const b = { x: l.to.x * w, y: l.to.y * h };
+    for (const [end, q] of [['from', a], ['to', b]]) {
+      const d = Math.hypot(px.x - q.x, px.y - q.y);
+      if (d < grab && (!best || d < best.d)) best = { index: i, end, d };
+    }
+    // 線そのものをつかんだら、線ごと平行移動する
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const len2 = vx * vx + vy * vy;
+    if (len2 > 0) {
+      const t = Math.max(0, Math.min(1, ((px.x - a.x) * vx + (px.y - a.y) * vy) / len2));
+      const d = Math.hypot(px.x - (a.x + vx * t), px.y - (a.y + vy * t));
+      if (d < grab && (!best || d < best.d - 1)) best = { index: i, end: null, d };
+    }
+  });
+  return best;
+}
+
+els.videoOverlay.addEventListener('pointerdown', e => {
+  if (!guideEditing || !current) return;
+  const p = guidePoint(e);
+  const hit = guideHit(p);
+  current.selectedGuide = hit ? hit.index : null;
+  if (hit) {
+    guideDrag = { ...hit, last: p };
+    els.videoOverlay.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  updateGuideButtons();
+  drawGuides();
+});
+
+els.videoOverlay.addEventListener('pointermove', e => {
+  if (!guideDrag) return;
+  const p = guidePoint(e);
+  const l = current.guides[guideDrag.index];
+  if (guideDrag.end) {
+    l[guideDrag.end] = p;                        // つまんだ端だけ動かす
+  } else {
+    const dx = p.x - guideDrag.last.x, dy = p.y - guideDrag.last.y;
+    l.from = { x: l.from.x + dx, y: l.from.y + dy };
+    l.to = { x: l.to.x + dx, y: l.to.y + dy };
+  }
+  guideDrag.last = p;
+  setDirty(true);                                // 直した線で作り直せることを知らせる
+  drawGuides();
+  e.preventDefault();
+});
+
+const endGuideDrag = () => { guideDrag = null; };
+els.videoOverlay.addEventListener('pointerup', endGuideDrag);
+els.videoOverlay.addEventListener('pointercancel', endGuideDrag);
+
+/** 編集中だけ canvas がタップを受ける（ふだんは再生ボタンを塞がない） */
+function setGuideEditing(on) {
+  if (on) { stopTour(); stopSlowReview(); }
+  guideEditing = on;
+  els.videoOverlay.classList.toggle('editing', on);
+  els.guideEdit.classList.toggle('active', on);
+  els.guideEdit.textContent = on ? '動かすのをやめる' : '線を動かす';
+  if (on) els.video.pause();
+  else { current.selectedGuide = null; refreshAllFrames(); }
+  updateGuideButtons();
+  drawGuides();
+}
+
+function updateGuideButtons() {
+  const n = (current && current.guides ? current.guides.length : 0);
+  els.guideAdd.disabled = !guideEditing || n >= 8;
+  els.guideDel.disabled = !guideEditing || current.selectedGuide === null;
+  els.guideReset.disabled = !guideEditing;
+}
+
+/** 編集をやめたら、各ポジションの画像も新しい線で描き直す */
+async function refreshAllFrames() {
+  if (!current) return;
+  for (const phase of PHASE_ORDER) {
+    if (current.keys[phase] !== undefined) await refreshFrame(phase);
+  }
+}
+
+els.guideEdit.addEventListener('click', () => setGuideEditing(!guideEditing));
+
+els.guideAdd.addEventListener('click', () => {
+  if (!current) return;
+  // 画面の真ん中に、まっすぐな線を 1 本足す。あとは端をつまんで合わせる
+  current.guides.push({ id: 'manual', from: { x: 0.5, y: 0.1 }, to: { x: 0.5, y: 0.9 } });
+  current.selectedGuide = current.guides.length - 1;
+  setDirty(true);
+  updateGuideButtons();
+  drawGuides();
+});
+
+els.guideDel.addEventListener('click', () => {
+  if (!current || current.selectedGuide === null) return;
+  current.guides.splice(current.selectedGuide, 1);
+  current.selectedGuide = null;
+  setDirty(true);
+  updateGuideButtons();
+  drawGuides();
+});
+
+els.guideReset.addEventListener('click', () => {
+  initGuides();
+  updateGuideButtons();
+  drawGuides();
+});
 
 /* ------------------- 動画をポジションで止めて注意点を出す ------------------- */
 
@@ -520,7 +842,7 @@ function buildVideoNav() {
     b.className = 'video-nav-btn';
     b.dataset.phase = phase;
     b.textContent = shortPhaseLabel(phase);
-    b.addEventListener('click', () => jumpToPhase(phase));
+    b.addEventListener('click', () => { stopTour(); jumpToPhase(phase); });
     els.videoNav.appendChild(b);
   }
   if (els.videoNav.children.length) showPhaseNotes(PHASE_ORDER.find(p => keys[p] !== undefined));
@@ -697,15 +1019,20 @@ function renderLesson(result) {
   els.lessonCard.hidden = false;
 }
 
-/* アドレス基準表の各行と、それを裏づける計測項目の対応 */
-/* view はその項目を確かめられるカメラの位置。撮った角度に合う行だけを出します。
- * ボールの位置は帯を正面のアドレス画像にだけ描いているので front です */
+/*
+ * クラブごとのアドレスの目安（CLUBS の中身）を出す表。
+ * 判定と計測値は、すぐ下に続くアドレスの診断項目がそのまま担うので、
+ * ここでは「言葉での目安」だけを出します（同じ数字を 2 か所に出さないため）。
+ *
+ * view はその項目を確かめられるカメラの位置。撮った角度に合う行だけを出します。
+ * ボールの位置は帯を正面のアドレス画像にだけ描いているので front です。
+ */
 const REF_ROWS = [
-  { label: 'ボールの位置', field: 'ball', view: 'front', ids: [] },
-  { label: 'スタンスの幅', field: 'stance', view: 'front', ids: ['stanceWidth'] },
-  { label: '左右の重心', field: 'balance', view: 'front', ids: ['addressBalance'] },
-  { label: '前傾角', field: 'spine', view: 'side', ids: ['spineAddress'] },
-  { label: '手元の位置', field: 'hands', view: 'side', ids: ['handPosSide', 'handDistance'] }
+  { label: 'ボールの位置', field: 'ball', view: 'front' },
+  { label: 'スタンスの幅', field: 'stance', view: 'front' },
+  { label: '左右の重心', field: 'balance', view: 'front' },
+  { label: '前傾角', field: 'spine', view: 'side' },
+  { label: '手元の位置', field: 'hands', view: 'side' }
 ];
 
 /* 角度を変えて撮ると出る項目の案内文（表から消えた行の行き先を示すため） */
@@ -715,71 +1042,29 @@ const REF_NOTE = {
 };
 
 /**
- * 番手ごとのアドレス基準を、実際の計測結果と並べて表示する。
- * 目安を書くだけでなく、その場で判定まで出します。
+ * アドレスのカードの先頭に置く「このクラブの目安」。
+ * 以前は独立したカードで計測値と判定まで出していましたが、すぐ下のアドレスの
+ * 診断項目とまるごと重複していたので、言葉の目安だけをここに残しました。
  */
-async function renderReference(club, result, opt, keys, frames) {
+function buildClubGuide(club, opt) {
   const c = CLUBS[club];
-  els.clubName.textContent = c.label;
+  const box = document.createElement('div');
+  box.className = 'club-guide';
+  box.appendChild(text('h4', `${c.label} で構えるときの目安`));
 
-  // 目安と見比べられるよう、アドレスのコマをこの表の横にも出す
-  els.refFrame.innerHTML = '';
-  if (keys.address !== undefined) {
-    const crop = opt.mode === 'photo'
-      ? swingCrop(frames, [keys.address], frames[keys.address].img.naturalWidth,
-        frames[keys.address].img.naturalHeight, FRAME_ASPECT)
-      : current.crop;
-    els.refFrame.appendChild(await captureFrame(frames[keys.address], 'address', opt, crop));
-    els.refFrame.appendChild(text('figcaption', opt.mode === 'photo'
-      ? 'あなたのアドレス'
-      : `あなたのアドレス（${frames[keys.address].t.toFixed(2)} 秒）`));
-    // ここでもアドレスの位置を直せるようにする
-    if (opt.mode !== 'photo') els.refFrame.appendChild(buildFrameNav('address'));
-    els.refFrame.hidden = false;
-  } else {
-    els.refFrame.hidden = true;
-  }
-
-  els.refTable.innerHTML = '';
-
-  const head = document.createElement('tr');
-  head.append(text('th', ''), text('th', '目安'), text('th', 'あなたのアドレス'));
-  els.refTable.appendChild(head);
-
-  els.refNote.textContent =
-    `このクラブで構えるときの目安と、実際のアドレスを並べています。${REF_NOTE[opt.view] || ''}`;
-
+  const table = document.createElement('table');
+  table.className = 'ref-table';
   for (const row of REF_ROWS.filter(r => r.view === opt.view)) {
     const tr = document.createElement('tr');
     tr.append(text('th', row.label), text('td', c[row.field]));
-
-    const td = document.createElement('td');
-    const found = row.ids.map(id => result.items.find(i => i.id === id)).filter(Boolean);
-
-    if (found.length) {
-      for (const item of found) {
-        const line = document.createElement('div');
-        line.className = 'ref-measure ' + (item.score >= 90 ? 's-good' : item.score >= 60 ? 's-warn' : 's-bad');
-        const badge = document.createElement('span');
-        badge.className = 'badge';
-        badge.textContent = item.score >= 90 ? '良好' : item.score >= 60 ? '要注意' : '要改善';
-        line.append(badge, document.createTextNode(
-          `${fmt(item.value, item.unit, item.signLabels)}`
-          + `（目安 ${fmtRange(item.ideal, item.unit, item.signLabels)}）`));
-        td.appendChild(line);
-      }
-    } else if (row.ids.length) {
-      // 角度は合っているのに値が出なかった（骨格が取れなかった等）
-      td.appendChild(text('span', 'この映像からは判定できませんでした'));
-      td.className = 'ref-na';
-    } else {
-      td.appendChild(text('span', 'アドレス画像の緑の帯でご確認ください（ボールは検出できません）'));
-      td.className = 'ref-na';
-    }
-
-    tr.appendChild(td);
-    els.refTable.appendChild(tr);
+    table.appendChild(tr);
   }
+  box.appendChild(table);
+
+  const note = text('p', REF_NOTE[opt.view] || '');
+  note.className = 'note';
+  box.appendChild(note);
+  return box;
 }
 
 /**
@@ -815,6 +1100,8 @@ async function renderPhases(result, keys, opt) {
 
     const col = document.createElement('div');
     col.className = 'phase-items';
+    // アドレスだけ、クラブごとの目安を先頭に置く（以前は独立したカードでした）
+    if (phase === 'address') col.appendChild(buildClubGuide(opt.club, opt));
     for (const item of items) col.appendChild(buildItem(item));
 
     // この撮影角度では測れる項目がないポジション（例: 正面から見たバックスイング）
@@ -921,12 +1208,6 @@ async function nudgeFrame(phase, delta) {
 
   keys[phase] = next;
   await refreshFrame(phase);
-
-  // アドレスはアドレス基準表にも出しているので、そちらも差し替える
-  if (phase === 'address' && !els.refFrame.hidden) {
-    const { opt } = current;
-    await renderReference(opt.club, current.lastResult, opt, keys, frames);
-  }
   setDirty(true);
 }
 
@@ -1119,14 +1400,35 @@ async function captureFrame(frame, phase, opt, crop) {
 
   if (frame.lms) {
     drawSkeleton(ctx, frame.lms, map);
-    if (phase === 'address' && opt.view === 'side') {
-      drawNeckLine(ctx, frame.lms, map, opt.hand);
-    }
+    // 赤いガイド線は全ポジションに重ねる（動画のスロー再生と同じ線）
+    drawGuideLines(ctx, map, w);
     if (phase === 'address' && opt.view === 'front') {
       drawBallZone(ctx, frame.lms, map, opt.hand, opt.club, h);
     }
   }
   return canvas;
+}
+
+/*
+ * 切り出し画像にも、動画と同じ赤いガイド線を重ねる。
+ * 線はアドレスで固定した current.guides をそのまま使うので、どのポジションの
+ * 画像でも同じ位置に出ます（クラブがその線をどう通ったかを見るため）。
+ */
+function drawGuideLines(ctx, map, canvasW) {
+  const lines = (current && current.guides) || [];
+  if (!lines.length) return;
+  ctx.save();
+  ctx.strokeStyle = '#e5322d';
+  ctx.lineWidth = Math.max(2, Math.round(canvasW / 220));
+  ctx.lineCap = 'round';
+  for (const l of lines) {
+    ctx.beginPath();
+    const a = map(l.from), b = map(l.to);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /** アドレス画像に、その番手の正しいボール位置の目安を帯で描く */
@@ -1223,9 +1525,12 @@ els.resetBtn.addEventListener('click', () => {
   els.videoSlot.appendChild(els.video);              // 動画プレーヤーを設定画面に戻す
   // 前回の結果を捨てる。残しておくと、次の動画を選んでいる最中の pause / seeked で
   // 前のスイングの注意点に切り替わってしまいます
+  stopSlowReview();
+  stopTour();
   current = null;
   els.videoNav.innerHTML = '';
   els.videoNotes.innerHTML = '';
+  els.videoOverlay.getContext('2d').clearRect(0, 0, els.videoOverlay.width, els.videoOverlay.height);
   els.videoCard.hidden = true;
   els.result.hidden = true;
   els.setup.hidden = false;

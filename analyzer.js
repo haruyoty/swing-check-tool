@@ -481,16 +481,27 @@ function detectKeyFrames(frames, handedness) {
  */
 function measure(frames, keys, handedness, view, aspect) {
   const S = sides(handedness);
-  const at = i => frames[i] && frames[i].lms;
 
   /*
    * ランドマークの x と y は、それぞれ画面の幅・高さを 1 とした値です。単位が
-   * 違うので、そのまま角度を出すと画面の縦横比のぶんだけ歪みます。16:9 の映像
-   * では実際の 30° が 18° に見えてしまいます（実測で確認）。
-   * 角度を求めるときだけ、x を高さ基準にそろえてから計算します。
+   * 違うので、そのままでは映像の縦横比のぶんだけ歪みます。16:9 の映像では
+   * 実際の 30° が 18° に見え、横方向の距離も実際より短く出ます。
+   *
+   * 以前は角度を求めるときだけそろえていましたが、それだと「横方向の距離 ÷
+   * 体格」の項目（手と体の距離、腰の移動量など）が縦横比で変わってしまいます。
+   * 実測では、同じ姿勢でも手と体の距離が 16:9 で 0.91 拳、9:16 で 3.05 拳、
+   * 1:1 で 2.03 拳と、まったく別の値になっていました。
+   *
+   * そこで、コマを取り出す時点で x を高さ基準にそろえます。これ以降の計算は
+   * すべて同じ単位なので、縦でも横でも同じ数値になります。
    */
   const ratio = aspect || 1;
   const ac = p => ({ x: p.x * ratio, y: p.y });
+  // frames[i].lms は元のままなので、生の座標を使う medianElbow などには ac を渡します
+  const at = i => {
+    const lms = frames[i] && frames[i].lms;
+    return lms ? lms.map(ac) : lms;
+  };
   const A = at(keys.address), B = at(keys.backswing), T = at(keys.top),
     D = at(keys.downswing), I = at(keys.impact), W = at(keys.follow), F = at(keys.finish);
 
@@ -544,7 +555,7 @@ function measure(frames, keys, handedness, view, aspect) {
     // 肩の傾き（トレール肩が下がっていればプラス）
     m.shoulderTilt = deg(Math.atan2(
       A[S.trail.shoulder].y - A[S.lead.shoulder].y,
-      Math.abs(ac(A[S.lead.shoulder]).x - ac(A[S.trail.shoulder]).x)
+      Math.abs(A[S.lead.shoulder].x - A[S.trail.shoulder].x)
     ));
 
     // テークバック（シャフトが水平）でのチェック
@@ -578,7 +589,7 @@ function measure(frames, keys, handedness, view, aspect) {
       m.hipAtImpact = (hipC(I).x - hipC(A).x) * targetSign / torso;
 
       // インパクトのリード脚：膝が目標方向に出ているとプラス
-      m.leadLegImpact = tiltFromVertical(ac(I[S.lead.ankle]), ac(I[S.lead.knee]), targetSign);
+      m.leadLegImpact = tiltFromVertical(I[S.lead.ankle], I[S.lead.knee], targetSign);
     }
 
     /*
@@ -597,7 +608,7 @@ function measure(frames, keys, handedness, view, aspect) {
 
     if (F) {
       // フィニッシュ：リード足首とトレール肩を結んだラインの垂直からの傾き
-      m.finishStack = Math.abs(tiltFromVertical(ac(F[S.lead.ankle]), ac(F[S.trail.shoulder])));
+      m.finishStack = Math.abs(tiltFromVertical(F[S.lead.ankle], F[S.trail.shoulder]));
 
       // その線の上にトレール腰も乗っているか（左足・右腰・右肩が一直線か）
       m.finishHipLine = distanceToLine(F[S.trail.hip], F[S.lead.ankle], F[S.trail.shoulder]) / torso;
@@ -606,9 +617,11 @@ function measure(frames, keys, handedness, view, aspect) {
 
   /* --------------------------- 後方からの計測 --------------------------- */
   if (view === 'side') {
-    const spine = p => tiltFromVertical(ac(hipC(p)), ac(shoulderC(p)), frontSign);
+    const spine = p => tiltFromVertical(hipC(p), shoulderC(p), frontSign);
     const spineA = spine(A);
     m.spineAddress = Math.abs(spineA);
+    const TBs = at(keys.takeaway);
+    if (TBs) m.spineAtTakeaway = Math.abs(spine(TBs) - spineA);
     if (T) m.spineAtTop = Math.abs(spine(T) - spineA);
     if (D) m.spineAtDownswing = Math.abs(spine(D) - spineA);
     if (I) m.spineAtImpact = Math.abs(spine(I) - spineA);
@@ -664,10 +677,23 @@ function measure(frames, keys, handedness, view, aspect) {
       }
     }
 
-    // 手と体の距離。体の前面の代わりに膝の位置を基準にしています。
-    // 拳 1 個は頭幅のおよそ 0.55 倍（拳の幅 約8.5cm / 頭幅 約15cm）。
-    const fist = headW * 0.55;
-    m.handDistance = (handC(A).x - mid(A[S.lead.knee], A[S.trail.knee]).x) * frontSign / fist;
+    /*
+     * 手と体の距離（拳いくつ分か）。
+     *
+     * 以前は膝を体の基準にしていましたが、膝の位置は曲げ具合で大きく動くうえ、
+     * アドレスでは手元とほぼ同じ前後位置に来るため、実際は離れているのに
+     * 「近すぎる」と出ていました。胴の位置そのもの（腰の中心）を基準にします。
+     *
+     *   体の前面 ≒ 腰の中心 ＋ お腹の厚みの半分
+     *   お腹の厚み 約22cm ÷ 2 ＝ 11cm、腰の中心〜肩の中心 約47cm なので 0.23 × 胴の長さ
+     *   拳 1 個 8.5cm ＝ 頭幅 15cm の 0.55 倍、頭幅 ≒ 0.35 × 胴の長さ
+     *
+     * 前傾 38°・手元が肩の真下なら 2.0 拳ぶんになり、目安（拳 1.4〜2.1 個）と合います。
+     * 後方から見ると両耳が重なるので、頭幅は耳の間隔ではなく胴の長さから求めます。
+     */
+    const fist = torso * 0.35 * 0.55;
+    const bodyHalfDepth = torso * 0.23;
+    m.handDistance = ((handC(A).x - hipC(A).x) * frontSign - bodyHalfDepth) / fist;
 
     // 前後の重心。腰の中心が、かかと（足首）とつま先の中間からどちら側にあるか
     const toeMid = mid(A[S.lead.foot], A[S.trail.foot]);
@@ -691,7 +717,7 @@ function measure(frames, keys, handedness, view, aspect) {
   // すね（膝→足首）ではありません。フルフィニッシュでは足を後ろに残したまま
   // つま先立ちになるため、すねは大きく傾いていても足自体は垂直になります。
   if (F) {
-    m.trailFootFinish = Math.abs(tiltFromVertical(ac(F[S.trail.foot]), ac(F[S.trail.heel])));
+    m.trailFootFinish = Math.abs(tiltFromVertical(F[S.trail.foot], F[S.trail.heel]));
   }
 
   return m;
@@ -712,6 +738,136 @@ function neckLine(lms, handedness) {
   if (Math.abs(dy) < 1e-6) return null;
   const k = (groundY - neck.y) / dy;
   return { from: neck, to: { x: neck.x + (hands.x - neck.x) * k, y: groundY } };
+}
+
+/*
+ * クラブのライ角（シャフトが地面となす角度）のおおよその値。
+ * シャフトもボールもクラブ側なので検出できません。ここでは「手元からこの角度で
+ * 地面まで下ろした先にボールがある」とみなして、シャフトのラインを引いています。
+ */
+const LIE_ANGLE = { driver: 56, fwut: 57, iron: 61, wedge: 64 };
+
+/**
+ * 動画・画像に重ねる赤いガイド線を返す。
+ *
+ *   正面 … 鼻を通る垂直線（頭の少し上から地面まで）。頭が左右に動いていないか
+ *   後方 … シャフトのライン／ボールと首の付け根を結んだ線／お尻の後ろの垂直線
+ *
+ * 座標は元の映像と同じ正規化値（x は幅の割合、y は高さの割合）。
+ * 角度を扱うので、映像の縦横比 aspect を渡してください。
+ */
+function guideLines(lms, handedness, view, club, aspect) {
+  if (!lms || !lms[LM.nose]) return [];
+  const S = sides(handedness);
+  const r = aspect || 1;
+  const lines = [];
+
+  const ground = Math.max(
+    lms[S.lead.ankle].y, lms[S.trail.ankle].y,
+    (lms[S.lead.heel] || { y: 0 }).y, (lms[S.trail.heel] || { y: 0 }).y);
+  const earGap = dist(lms[LM.lEar], lms[LM.rEar]) * r;
+  const shoulderC = mid(lms[S.lead.shoulder], lms[S.trail.shoulder]);
+  const hipC = mid(lms[S.lead.hip], lms[S.trail.hip]);
+  const torso = Math.hypot((shoulderC.x - hipC.x) * r, shoulderC.y - hipC.y) || 0.25;
+  // 後方からは両耳が重なるので、頭幅は胴の長さから見積もる
+  const headW = (view === 'front' && earGap > torso * 0.1) ? earGap : torso * 0.35;
+  const aboveHead = lms[LM.nose].y - headW * 1.1;      // 頭の少し上
+
+  if (view === 'front') {
+    const x = lms[LM.nose].x;
+    lines.push({ id: 'nose', from: { x, y: aboveHead }, to: { x, y: ground } });
+    return lines;
+  }
+
+  /* ------------------------------ 後方 ------------------------------ */
+  const toeMid = mid(lms[S.lead.foot], lms[S.trail.foot]);
+  const ankleMid = mid(lms[S.lead.ankle], lms[S.trail.ankle]);
+  const frontSign = Math.sign(toeMid.x - ankleMid.x) || 1;   // つま先の向き＝ボール側
+
+  for (const l of planeLines(lms, handedness, estimateBall(lms, handedness, club, aspect), aspect)) {
+    lines.push(l);
+  }
+
+  /*
+   * 背中の後ろの線。背骨（腰の中心→肩の中心）と平行に、お腹の厚みの半分だけ
+   * 後ろへずらした線を、頭の上からお尻の少し下まで引きます。
+   * 地面まで伸ばすと脚に重なって、背中の向きが読み取りにくくなります。
+   */
+  const backBottom = Math.min(ground, hipC.y + torso * 0.30);
+  const hx = hipC.x * r, sx = shoulderC.x * r;
+  const len = Math.hypot(sx - hx, shoulderC.y - hipC.y);
+  if (len > 1e-6) {
+    const ux = (sx - hx) / len, uy = (shoulderC.y - hipC.y) / len;   // 腰→肩の向き
+    const nx = frontSign * uy, ny = -frontSign * ux;                 // 背中側へ向かう法線
+    const d = torso * 0.23;
+    const px = hx + nx * d, py = hipC.y + ny * d;
+    const along = y => ({ x: (px + ux * (y - py) / uy) / r, y });    // その高さでの点
+    if (Math.abs(uy) > 1e-6) {
+      lines.push({ id: 'back', from: along(aboveHead), to: along(backBottom) });
+    }
+  }
+  return lines;
+}
+
+/** 後方から見た「頭の少し上」「地面」など、線を引くのに使う基準の高さ */
+function guideAnchors(lms, handedness, aspect) {
+  const S = sides(handedness);
+  const r = aspect || 1;
+  const shoulderC = mid(lms[S.lead.shoulder], lms[S.trail.shoulder]);
+  const hipC = mid(lms[S.lead.hip], lms[S.trail.hip]);
+  const torso = Math.hypot((shoulderC.x - hipC.x) * r, shoulderC.y - hipC.y) || 0.25;
+  const ground = Math.max(
+    lms[S.lead.ankle].y, lms[S.trail.ankle].y,
+    (lms[S.lead.heel] || { y: 0 }).y, (lms[S.trail.heel] || { y: 0 }).y);
+  return {
+    shoulderC, hipC, torso, ground,
+    hands: mid(lms[LM.lWrist], lms[LM.rWrist]),
+    aboveHead: lms[LM.nose].y - torso * 0.35 * 1.1
+  };
+}
+
+/**
+ * ボールの位置の当て推量。手元からクラブのライ角で地面まで下ろした先を返します。
+ * シャフトもボールもクラブ側なので検出できません。実際とズレていたら、画面で
+ * ボールの点をつまんで動かしてください（planeLines がそこから引き直します）。
+ */
+function estimateBall(lms, handedness, club, aspect) {
+  if (!lms || !lms[LM.nose]) return null;
+  const S = sides(handedness);
+  const r = aspect || 1;
+  const { hands, ground } = guideAnchors(lms, handedness, aspect);
+  const toeMid = mid(lms[S.lead.foot], lms[S.trail.foot]);
+  const ankleMid = mid(lms[S.lead.ankle], lms[S.trail.ankle]);
+  const frontSign = Math.sign(toeMid.x - ankleMid.x) || 1;
+  const drop = ground - hands.y;
+  if (!(drop > 0)) return null;
+  const lie = (LIE_ANGLE[club] || 60) * Math.PI / 180;
+  return { x: hands.x + frontSign * (drop / Math.tan(lie)) / r, y: ground };
+}
+
+/**
+ * ボールの位置を決めれば、スイングプレーンの 2 本はそこから一意に決まります。
+ *   シャフトのライン … ボール（＝ヘッド）と手元を結んだ線
+ *   首の付け根の線   … ボールと首の付け根を結んだ線
+ * どちらも頭の少し上まで伸ばして返します。
+ */
+function planeLines(lms, handedness, ball, aspect) {
+  if (!lms || !lms[LM.nose] || !ball) return [];
+  const { shoulderC, hands, aboveHead } = guideAnchors(lms, handedness, aspect);
+  const out = [];
+  const extend = (id, through) => {
+    const dy = ball.y - through.y;
+    if (Math.abs(dy) < 1e-6) return;
+    const k = (ball.y - aboveHead) / dy;
+    out.push({
+      id,
+      from: { x: ball.x, y: ball.y },
+      to: { x: ball.x + (through.x - ball.x) * k, y: aboveHead }
+    });
+  };
+  extend('neck', shoulderC);
+  extend('shaft', hands);
+  return out;
 }
 
 /* 切り出しの範囲を決めるときに見るランドマーク（顔の細かい点は含めない） */
@@ -807,6 +963,8 @@ function diagnose(metrics, view, club) {
   for (const raw of CRITERIA) {
     if (raw.view !== 'both' && raw.view !== view) continue;
     const c = resolveCriterion(raw, club);
+    // byClub に skip: true があるクラブでは、その項目を出しません
+    if (c.skip) continue;
     const value = metrics[c.id];
     if (value === undefined || value === null || isNaN(value)) continue;
 

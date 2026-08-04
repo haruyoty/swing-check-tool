@@ -9,7 +9,8 @@ const dir = __dirname;
 const src = ['criteria.js', 'videos.js', 'lessons.js', 'analyzer.js']
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
 const A = new Function('document', src + `
-  return {detectKeyFrames, measure, diagnose, scoreOne, neckLine, ballGuide, sides,
+  return {detectKeyFrames, measure, diagnose, scoreOne, neckLine, ballGuide, sides, guideLines,
+          estimateBall, planeLines,
           lessonVideo, lessonCandidates, searchLessons, normalizeTitle, LESSON_CANDIDATES,
           swingCrop, CRITERIA, CLUBS, VISUAL_CHECKS, PHASE_LABELS, LESSON_QUERIES,
           CHANNEL_VIDEOS, CHANNEL_URL, CATALOG_UPDATED, CONTACT_LINKS, resolveCriterion};`)(null);
@@ -234,13 +235,28 @@ check('手元が肩の真下より前（正）', mS.handPosSide > 0, true);
 // 手と体の距離は「拳いくつ分」という換算値なので、絶対値は撮影条件で変わる。
 // ここでは向きが正しいこと（体から離すほど大きくなること）を確かめる。
 {
-  const dist = ahead => {
-    const f = buildSide(30, ahead);
+  const dist = (ahead, spine = 30) => {
+    const f = buildSide(spine, ahead);
     return A.measure(f, A.detectKeyFrames(f, 'right'), 'right', 'side').handDistance;
   };
   const near = dist(0.01), far = dist(0.06);
   check('手と体の距離が有限の値になる', isFinite(near) && near > 0, true);
   check('手を体から離すほど大きくなる', far > near, true);
+
+  /*
+   * 基準は「腰の中心から、お腹の厚みの半分だけ前が体の前面」という換算。
+   * 前傾 38°・手元が肩の真下なら 2.0 拳ぶん、という導出どおりになるかを見る。
+   * 以前は膝を基準にしていて、実際は離れているのに 1 拳未満と出ていた。
+   */
+  check('前傾38°・手は肩の真下 → 拳 2.0 個分', dist(0, 38), 2.0, 0.05);
+  check('前傾30°・手は肩の真下 → 拳 1.4 個分', dist(0, 30), 1.40, 0.05);
+  check('前傾が深いほど手は体から離れる', dist(0, 45) > dist(0, 30), true);
+
+  const band = A.resolveCriterion(A.CRITERIA.find(c => c.id === 'handDistance'), 'iron').ideal;
+  check('前傾38°の値が目安の中に入る', dist(0, 38) >= band[0] && dist(0, 38) <= band[1], true);
+  check('手を体に付けたら「近すぎ」と出る',
+    A.diagnose({ handDistance: dist(-0.10, 38) }, 'side', 'iron')
+      .items.find(i => i.id === 'handDistance').status, 'low');
 }
 check('前後の重心が有限の値になる', isFinite(mS.weightFrontBack), true);
 const s45 = buildSide(45);
@@ -374,6 +390,42 @@ section('4-3. 後方：背骨と左前腕が平行か');
   check('25° のずれは「ずれている」判定', scoreAt(SPINE + 25).status, 'high');
 }
 
+section('4-4. 縦で撮っても横で撮っても同じ数値になるか');
+/*
+ * 骨格の x は「幅の何割」、y は「高さの何割」。同じ人・同じ姿勢でも、縦長で撮るか
+ * 横長で撮るかで x の刻みが変わるので、正規化された座標そのものが変わる。
+ * measure() に縦横比を渡して単位をそろえているので、結果は一致しなければならない。
+ *
+ * 以前は角度だけをそろえていて、「横方向の距離 ÷ 体格」の項目が縦横比で変わっていた。
+ * 実測で、同じ姿勢の手と体の距離が 16:9 で 0.91 拳・9:16 で 3.05 拳・1:1 で 2.03 拳。
+ */
+{
+  /* 縦横比 r の映像で撮ったときの見え方（x が 1/r に詰まって写る） */
+  const shot = (frames, r) => frames.map(f => ({
+    t: f.t, lms: f.lms.map(p => ({ x: 0.5 + (p.x - 0.5) / r, y: p.y }))
+  }));
+  const aspects = [['横長 16:9', 16 / 9], ['縦長 9:16', 9 / 16], ['4:3', 4 / 3]];
+
+  for (const [viewName, base] of [['front', fF], ['side', fS]]) {
+    const ref = A.measure(base, A.detectKeyFrames(base, 'right'), 'right', viewName, 1);
+    for (const [name, r] of aspects) {
+      const f = shot(base, r);
+      const m = A.measure(f, A.detectKeyFrames(f, 'right'), 'right', viewName, r);
+      const off = Object.keys(ref).filter(k =>
+        typeof ref[k] === 'number' && Math.abs(m[k] - ref[k]) > 0.01);
+      check(`${viewName} / ${name}: 全項目が 1:1 と一致${off.length ? '（ずれ: ' + off.join(', ') + '）' : ''}`,
+        off.length, 0, 0);
+    }
+  }
+
+  // 縦横比を渡し忘れたときに気づけるよう、渡さない場合はずれることも確かめておく
+  const f = shot(fS, 16 / 9);
+  const noAspect = A.measure(f, A.detectKeyFrames(f, 'right'), 'right', 'side');
+  const withAspect = A.measure(f, A.detectKeyFrames(f, 'right'), 'right', 'side', 16 / 9);
+  check('縦横比を渡さないと手と体の距離がずれる',
+    Math.abs(noAspect.handDistance - withAspect.handDistance) > 0.5, true);
+}
+
 section('5. 悪いスイングを減点できるか');
 const good = A.diagnose(mF, 'front', 'driver');
 const cases = [
@@ -417,6 +469,30 @@ check('インパクトの頭: ドライバーは右に残す', bandOf('headAtImp
 check('インパクトの頭: アイアンは戻す', bandOf('headAtImpact', 'iron')[0] < 0, true);
 check('スタンス幅: ドライバーの方が広い',
   bandOf('stanceWidth', 'driver')[1] > bandOf('stanceWidth', 'iron')[1], true);
+
+section('6-2. クラブによって出す・出さないが変わる項目');
+{
+  const has = (club, id) => A.diagnose(mS, 'side', club).items.some(i => i.id === id);
+  check('背骨と左前腕の平行: アイアンでは出る', has('iron', 'armSpineParallel'), true);
+  check('背骨と左前腕の平行: 1W では出さない', has('driver', 'armSpineParallel'), false);
+  check('1W で消えるのはこの項目だけ',
+    A.diagnose(mS, 'side', 'iron').items.length - A.diagnose(mS, 'side', 'driver').items.length, 1, 0);
+  check('出さない項目は総合スコアにも入らない',
+    A.diagnose(mS, 'side', 'driver').items.every(i => i.id !== 'armSpineParallel'), true);
+
+  // テークバックの前傾は後方だけ・どのクラブでも出る
+  check('テークバックの前傾: 後方で出る',
+    A.diagnose(mS, 'side', 'driver').items.some(i => i.id === 'spineAtTakeaway'), true);
+  check('テークバックの前傾: 正面では出ない',
+    A.diagnose(mF, 'front', 'driver').items.some(i => i.id === 'spineAtTakeaway'), false);
+
+  // 手と体の距離の目安
+  const band = club => A.resolveCriterion(A.CRITERIA.find(c => c.id === 'handDistance'), club).ideal;
+  check('手と体の距離: アイアンは 1.2〜2.3', JSON.stringify(band('iron')), '[1.2,2.3]');
+  check('手と体の距離: FW・UT も 1.2〜2.3', JSON.stringify(band('fwut')), '[1.2,2.3]');
+  check('手と体の距離: ウエッジも 1.2〜2.3', JSON.stringify(band('wedge')), '[1.2,2.3]');
+  check('手と体の距離: 1W だけ広い', JSON.stringify(band('driver')), '[1.8,3.4]');
+}
 
 section('7. 同じスイングでも番手で評価が変わる');
 // 頭がアドレス位置に戻るスイング → アイアンでは満点、ドライバーでは減点
@@ -692,6 +768,117 @@ section('11-2. ボール位置の目安ゾーン（アドレス画像に描く�
   const gL = A.ballGuide(A0, 'left', 'driver');
   check('左打ちではゾーンが反対側に出る', (gR.from - gR.center) * (gL.from - gL.center) < 0, true);
   check('ballZone が未定義なら null', A.ballGuide(A0, 'right', 'nosuch'), null);
+}
+
+section('11-5. 動画・画像に重ねる赤いガイド線');
+{
+  const byId = (lines, id) => lines.find(l => l.id === id);
+
+  /* --- 正面：鼻を通る垂直線 --- */
+  {
+    const A0 = fF[kF.address].lms;
+    const g = A.guideLines(A0, 'right', 'front', 'iron', 1);
+    check('正面は 1 本だけ', g.length, 1, 0);
+    const nose = byId(g, 'nose');
+    check('鼻の位置を通る', nose.from.x, A0[0].x, 0.001);
+    check('垂直である', Math.abs(nose.to.x - nose.from.x), 0, 1e-9);
+    check('頭より上から始まる', nose.from.y < A0[0].y, true);
+    // 地面はかかとまで含めた足元のいちばん下
+    check('地面（足元）まで伸びる', nose.to.y,
+      Math.max(A0[27].y, A0[28].y, A0[29].y, A0[30].y), 0.001);
+  }
+
+  /* --- 後方：シャフト・首の付け根・お尻の後ろ --- */
+  {
+    const A0 = fS[kS.address].lms;
+    const g = A.guideLines(A0, 'right', 'side', 'iron', 1);
+    check('後方は 3 本', g.length, 3, 0);
+    const shaft = byId(g, 'shaft'), neck = byId(g, 'neck'), back = byId(g, 'back');
+    check('シャフトの線がある', !!shaft, true);
+    check('首の付け根の線がある', !!neck, true);
+    check('お尻の後ろの線がある', !!back, true);
+
+    // 2 本はボールで交わる（同じ点から始まる）
+    check('2 本が同じ点（ボール）から出ている',
+      Math.hypot(shaft.from.x - neck.from.x, shaft.from.y - neck.from.y), 0, 1e-9);
+    const ground = Math.max(A0[27].y, A0[28].y, A0[29].y, A0[30].y);
+    check('ボールは地面の高さ', shaft.from.y, ground, 0.001);
+
+    // つま先は画面右（ボール側）。ボールは手元より右
+    const hands = (A0[15].x + A0[16].x) / 2;
+    check('ボールは手元よりボール側', shaft.from.x > hands, true);
+
+    // 上端は頭より上で、2 本は上へ向かって離れていく
+    check('シャフトの線は頭より上まで伸びる', shaft.to.y < A0[0].y, true);
+    check('2 本は別の線', Math.abs(shaft.to.x - neck.to.x) > 0.005, true);
+
+    // 背中の後ろの線は、背骨と平行で、体の後ろ側（ボールと反対）にずれている
+    const hipX = (A0[23].x + A0[24].x) / 2, hipY = (A0[23].y + A0[24].y) / 2;
+    const shX = (A0[11].x + A0[12].x) / 2, shY = (A0[11].y + A0[12].y) / 2;
+    const cross = (shX - hipX) * (back.to.y - back.from.y)
+      - (shY - hipY) * (back.to.x - back.from.x);
+    check('背中の線は背骨と平行', Math.abs(cross) < 1e-6, true);
+
+    const t = (hipY - back.from.y) / (back.to.y - back.from.y);
+    const xAtHip = back.from.x + (back.to.x - back.from.x) * t;
+    check('背中の線は腰の高さで腰より後ろ', xAtHip < hipX, true);
+    // 背骨からの「垂直距離」がお腹の厚みの半分。真横に測ると前傾のぶん長くなる
+    const ux = back.to.x - back.from.x, uy = back.to.y - back.from.y;
+    const len = Math.hypot(ux, uy);
+    const perp = Math.abs((hipX - back.from.x) * uy - (hipY - back.from.y) * ux) / len;
+    check('背骨からの距離はお腹の厚みの半分', perp, 0.25 * 0.23, 0.002);
+    // 背中の線は頭の上から「お尻の少し下」まで。地面まで伸ばすと脚に重なる
+    check('背中の線は頭の上から始まる', back.from.y < A0[0].y, true);
+    check('下端はお尻の少し下', back.to.y, hipY + 0.25 * 0.30, 0.01);
+    check('下端は地面まで届かない', back.to.y < ground - 0.05, true);
+  }
+
+  /* --- 縦横比を変えても同じ場所を指すか --- */
+  {
+    const squeeze = p => ({ x: 0.5 + (p.x - 0.5) / (16 / 9), y: p.y });
+    const A0 = fS[kS.address].lms;
+    const g1 = A.guideLines(A0, 'right', 'side', 'iron', 1);
+    const g2 = A.guideLines(A0.map(squeeze), 'right', 'side', 'iron', 16 / 9);
+    // 横に潰して撮った映像では、線も同じだけ潰れた位置に出るはず
+    const off = g1.map((l, i) => Math.abs(squeeze(l.from).x - g2[i].from.x)
+      + Math.abs(squeeze(l.to).x - g2[i].to.x));
+    check('16:9 で撮っても同じ場所を指す', Math.max(...off) < 0.004, true);
+  }
+
+  /* --- クラブによってシャフトの角度（ライ角）が変わる --- */
+  {
+    const A0 = fS[kS.address].lms;
+    const ballX = club => A.guideLines(A0, 'right', 'side', club, 1).find(l => l.id === 'shaft').from.x;
+    check('ライ角が立つウエッジのほうがボールが手前', ballX('wedge') < ballX('driver'), true);
+  }
+
+  /* --- ボールの位置を決めれば、2 本は必ずシャフトと首の付け根の上に乗る --- */
+  {
+    const A0 = fS[kS.address].lms;
+    const hands = { x: (A0[15].x + A0[16].x) / 2, y: (A0[15].y + A0[16].y) / 2 };
+    const neck = { x: (A0[11].x + A0[12].x) / 2, y: (A0[11].y + A0[12].y) / 2 };
+    /* 点 p から線 l までの距離。0 なら線がその点を通っている */
+    const gap = (l, p) => {
+      const ux = l.to.x - l.from.x, uy = l.to.y - l.from.y;
+      return Math.abs((p.x - l.from.x) * uy - (p.y - l.from.y) * ux) / Math.hypot(ux, uy);
+    };
+    // ボールがどこにあっても、2 本は必ず手元と首の付け根を通ること
+    for (const ball of [A.estimateBall(A0, 'right', 'iron', 1), { x: 0.58, y: 0.90 }]) {
+      const [neckLine2, shaftLine] = A.planeLines(A0, 'right', ball, 1);
+      const tag = ball.y === 0.90 ? 'ボールが別の位置' : '推定したボール';
+      check(`${tag}: シャフトの線が手元を通る`, gap(shaftLine, hands), 0, 1e-9);
+      check(`${tag}: 首の線が首の付け根を通る`, gap(neckLine2, neck), 0, 1e-9);
+      check(`${tag}: 2 本ともボールから出ている`,
+        shaftLine.from.x === ball.x && shaftLine.from.y === ball.y
+        && neckLine2.from.x === ball.x && neckLine2.from.y === ball.y, true);
+      check(`${tag}: 上端は頭より上`, shaftLine.to.y < A0[0].y && neckLine2.to.y < A0[0].y, true);
+    }
+    check('ボールが無ければ 2 本とも引かない', A.planeLines(A0, 'right', null, 1).length, 0, 0);
+  }
+
+  /* --- 骨格が取れていないコマでは何も返さない --- */
+  check('骨格がなければ空', A.guideLines(null, 'right', 'front', 'iron', 1).length, 0, 0);
+  check('骨格がなければボールも出さない', A.estimateBall(null, 'right', 'iron', 1), null);
 }
 
 section('11-4. 人物の切り出し範囲');

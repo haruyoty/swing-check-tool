@@ -133,17 +133,40 @@
         動画を手で止めたときも、いちばん近いポジションの注意点に切り替わります。
         下の各ポジションの画像をクリックしても、ここに飛びます。
       </p>
-      <div id="videoHolder"></div>
-      <div class="video-nav" id="videoNav"></div>
-      <div class="video-notes" id="videoNotes"></div>
-    </div>
-
-    <div class="card">
-      <h2><span id="clubName"></span> のアドレス基準</h2>
-      <p class="note" id="refNote"></p>
-      <div class="ref-body">
-        <figure class="frame" id="refFrame"></figure>
-        <table class="ref-table" id="refTable"></table>
+      <div class="video-layout">
+        <div class="video-main">
+          <div id="videoHolder" class="video-holder">
+            <canvas id="videoOverlay"></canvas>
+          </div>
+          <div class="video-nav" id="videoNav"></div>
+          <div class="video-speed">
+            <span class="speed-label">再生速度</span>
+            <button type="button" class="speed-btn" data-rate="0.15">1/8</button>
+            <button type="button" class="speed-btn" data-rate="0.25">1/4</button>
+            <button type="button" class="speed-btn" data-rate="0.5">1/2</button>
+            <button type="button" class="speed-btn active" data-rate="1">等倍</button>
+            <label class="guide-toggle">
+              <input type="checkbox" id="guideToggle" checked>
+              <span>赤い線を出す</span>
+            </label>
+          </div>
+          <div class="guide-edit">
+            <button type="button" id="replayBtn" class="replay">スローで見直す</button>
+            <button type="button" id="tourBtn" class="replay">コメント付きスロー</button>
+            <button type="button" id="guideEdit">線を動かす</button>
+            <button type="button" id="guideAdd" disabled>線を足す</button>
+            <button type="button" id="guideDel" disabled>選んだ線を消す</button>
+            <button type="button" id="guideReset" disabled>最初に戻す</button>
+          </div>
+          <p class="note guide-note">
+            線はアドレスの位置で固定しているので、再生しても動きません。
+            <strong>線がズレている場合は、「線を動かす」ボタンを押すと修正できます。</strong>
+            線の端（●）をつまむとその端だけ、線の途中をつまむと線ごと動きます。
+          </p>
+        </div>
+        <div class="video-side">
+          <div class="video-notes" id="videoNotes"></div>
+        </div>
       </div>
     </div>
 
@@ -156,7 +179,7 @@
     <div id="phases"></div>
 
     <div class="rediagnose" id="rediagnoseBox" hidden>
-      <p id="rediagnoseNote">キーフレームの位置を変えました。この位置で診断し直せます。</p>
+      <p id="rediagnoseNote">キーフレームの位置か赤い線を変えました。この内容で作り直せます。</p>
       <button type="button" id="rediagnoseBtn" class="primary">修正した位置で診断し直す</button>
     </div>
 
