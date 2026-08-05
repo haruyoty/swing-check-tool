@@ -134,11 +134,12 @@
         下の各ポジションの画像をクリックしても、ここに飛びます。
       </p>
       <div class="video-layout">
-        <div class="video-main">
-          <div id="videoHolder" class="video-holder">
-            <canvas id="videoOverlay"></canvas>
-          </div>
-          <div class="video-nav" id="videoNav"></div>
+        <div id="videoHolder" class="video-holder">
+          <canvas id="videoOverlay"></canvas>
+        </div>
+        <div class="video-notes" id="videoNotes"></div>
+        <div class="video-nav" id="videoNav"></div>
+        <div class="video-controls">
           <div class="video-speed">
             <span class="speed-label">再生速度</span>
             <button type="button" class="speed-btn" data-rate="0.15">1/8</button>
@@ -163,9 +164,6 @@
             <strong>線がズレている場合は、「線を動かす」ボタンを押すと修正できます。</strong>
             線の端（●）をつまむとその端だけ、線の途中をつまむと線ごと動きます。
           </p>
-        </div>
-        <div class="video-side">
-          <div class="video-notes" id="videoNotes"></div>
         </div>
       </div>
     </div>
@@ -207,7 +205,7 @@
 </main>
 
 <footer class="site-footer">
-  <p>本ツールは 2 次元映像からの推定です。実測値ではなく傾向の目安としてご利用ください。診断基準は <code>criteria.js</code> を編集すると変更できます。</p>
+  <p>本ツールは 2 次元映像からの推定です。実測値ではなく傾向の目安としてご利用ください。</p>
 </footer>
 
 <!-- MediaPipe Pose（インターネット接続が必要です） -->

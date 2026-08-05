@@ -675,27 +675,47 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
 
 /* ------------------- 動画に重ねる赤いガイド線とスロー再生 ------------------- */
 
-/* 左に動画、右に注意点。狭い画面では縦に積む */
+/*
+ * 広い画面：左に動画・ポジションのボタン・操作、右に注意点。
+ * 狭い画面：動画 → 注意点 → ポジションのボタン → 操作 の縦並び。
+ * 並べ替えたいだけなので、grid のエリア指定で入れ替えています。
+ */
 .video-layout {
-  display: flex;
-  gap: 22px;
-  align-items: flex-start;
+  display: grid;
+  gap: 16px 22px;
+  grid-template-columns: 54fr 46fr;
+  grid-template-areas:
+    "player   notes"
+    "nav      notes"
+    "controls notes";
+  align-items: start;
 }
-.video-main { flex: 1 1 54%; min-width: 0; }
-.video-side { flex: 1 1 46%; min-width: 0; }
-.video-side .video-notes { margin-top: 0; }
+.video-layout > * { min-width: 0; }        /* 中身が長くても列からはみ出さない */
+.video-holder { grid-area: player; }
+.video-notes { grid-area: notes; margin-top: 0; }
+.video-nav { grid-area: nav; margin-top: 0; }
+.video-controls { grid-area: controls; }
+.video-controls .video-speed { margin-top: 0; }
 
 @media (max-width: 760px) {
-  .video-layout { display: block; }
-  .video-side { margin-top: 18px; }
+  .video-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: "player" "notes" "nav" "controls";
+  }
 }
 
 .video-holder { position: relative; line-height: 0; }
 .video-holder video { margin-top: 0; }
+/*
+ * 幅と高さを CSS で枠に合わせます。canvas の画素数（width 属性）だけに任せると、
+ * 画面の向きを変えたあとなどに古い大きさが残り、横スクロールが出ます。
+ */
 #videoOverlay {
   position: absolute;
   left: 0;
   top: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;                    /* ふだんは再生ボタンを塞がない */
 }
 #videoOverlay.editing {

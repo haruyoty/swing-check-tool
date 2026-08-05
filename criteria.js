@@ -822,8 +822,7 @@ const CONTACT_LINKS = [
        （デコードすると https://noyamagolf.com/オンラインレッスン/ ） */
     url: 'https://noyamagolf.com/%e3%82%aa%e3%83%b3%e3%83%a9%e3%82%a4%e3%83%b3%e3%83%ac%e3%83%83%e3%82%b9%e3%83%b3/',
     title: 'オンラインスイング診断',
-    lead: 'この診断で撮った正面と後方の動画を、そのまま LINE で送ってください。' +
-      '私が直接見て、なぜそのミスが出るのかをコメントと動画でお返しします。'
+    lead: 'LINE にスイング動画をお送りいただければ、私が直接見て、もっと詳しく診断いたします。'
   },
   {
     url: 'https://noyamagolf.com/?p=47',
