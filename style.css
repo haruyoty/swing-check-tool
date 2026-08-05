@@ -673,6 +673,21 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   display: block;
 }
 
+/* ポジションごとの総評（カードと注意点欄の先頭に置く 1 行） */
+.phase-summary {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-left: 4px solid var(--line);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg);
+  font-size: .88rem;
+  font-weight: 700;
+  line-height: 1.7;
+}
+.phase-summary.s-good { border-left-color: var(--good); }
+.phase-summary.s-warn { border-left-color: var(--warn); }
+.phase-summary.s-bad { border-left-color: var(--bad); }
+
 /* ------------------- 動画に重ねる赤いガイド線とスロー再生 ------------------- */
 
 /*

@@ -906,6 +906,10 @@ function showPhaseNotes(phase) {
     return;
   }
 
+  // まず総評
+  const summary = buildPhaseSummary(items);
+  if (summary) box.appendChild(summary);
+
   // 基準を外れたものを先に。同じ状態のなかでは点数の低い順
   for (const item of [...items].sort((a, b) => a.score - b.score)) {
     const row = document.createElement('div');
@@ -1020,6 +1024,38 @@ function renderLesson(result) {
 }
 
 /*
+ * そのポジションの総評。項目ごとの点数からその場で作ります。
+ * 項目を上から順に読まなくても、そのポジションが良いのか、どこから
+ * 直せばいいのかが一目で分かるように、カードの先頭に置きます。
+ */
+function phaseSummary(items) {
+  if (!items.length) return null;
+  const one = items.length === 1;                  // 1 項目のときは言い回しを変える
+  const off = items.filter(i => i.score < 90);
+  if (!off.length) {
+    return (one ? 'このポジションは基準内です。' : `${items.length} 項目すべてが基準内です。`)
+      + 'この形を崩さないようにしてください。';
+  }
+  const worst = items.reduce((a, b) => (b.score < a.score ? b : a));
+  const kind = off.some(i => i.score < 60) ? '基準を外れています' : '基準の境目です';
+  return (one ? `このポジションは${kind}。`
+    : `${items.length} 項目のうち ${off.length} 項目が${kind}。`)
+    + `まずは「${worst.label}」から直してください。`;
+}
+
+/** 総評の 1 行を作る（見出しの直後に置く） */
+function buildPhaseSummary(items) {
+  const text2 = phaseSummary(items);
+  if (!text2) return null;
+  const box = document.createElement('p');
+  const worstScore = items.reduce((a, b) => Math.min(a, b.score), 100);
+  box.className = 'phase-summary '
+    + (worstScore >= 90 ? 's-good' : worstScore >= 60 ? 's-warn' : 's-bad');
+  box.textContent = text2;
+  return box;
+}
+
+/*
  * クラブごとのアドレスの目安（CLUBS の中身）を出す表。
  * 判定と計測値は、すぐ下に続くアドレスの診断項目がそのまま担うので、
  * ここでは「言葉での目安」だけを出します（同じ数字を 2 か所に出さないため）。
@@ -1100,7 +1136,10 @@ async function renderPhases(result, keys, opt) {
 
     const col = document.createElement('div');
     col.className = 'phase-items';
-    // アドレスだけ、クラブごとの目安を先頭に置く（以前は独立したカードでした）
+    // まず総評。そのあとに個々の項目を並べる
+    const summary = buildPhaseSummary(items);
+    if (summary) col.appendChild(summary);
+    // アドレスだけ、クラブごとの目安を続けて置く（以前は独立したカードでした）
     if (phase === 'address') col.appendChild(buildClubGuide(opt.club, opt));
     for (const item of items) col.appendChild(buildItem(item));
 
