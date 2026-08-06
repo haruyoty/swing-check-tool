@@ -145,6 +145,20 @@ main, .site-header, .site-footer { max-width: 780px; margin: 0 auto; }
 
 #video { width: 100%; border-radius: var(--radius); margin-top: 16px; }
 
+/* 見えないが「置いてある」状態。display:none にするとスマホでカメラが開かない */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
 /* スマホでその場で撮るためのボタン（カメラのある端末にだけ出す） */
 .capture-btn {
   display: flex;
@@ -771,6 +785,7 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
 }
 .guide-edit button.replay::before { content: '▶ '; }
 .guide-note { margin-top: 8px; font-size: .78rem; }
+.shaft-status { display: block; margin-bottom: 4px; font-weight: 700; color: var(--accent); }
 
 .video-speed {
   display: flex;

@@ -10,7 +10,7 @@
 
 <header class="site-header">
   <h1>ゴルフスイング診断ツール</h1>
-  <p class="lead">スイング動画をアップロードすると、骨格を自動で検出して採点します（正面は 24 項目、後方は 19 項目）。動画はブラウザの中だけで処理され、どこにも送信されません。</p>
+  <p class="lead">スイング動画をアップロードすると、骨格を自動で検出して採点します（正面は 23 項目、後方は 20 項目）。動画はブラウザの中だけで処理され、どこにも送信されません。</p>
 </header>
 
 <main>
@@ -55,15 +55,19 @@
     </div>
 
     <div id="videoInput">
+      <!--
+        ファイル入力は hidden（display:none）にすると、スマホによっては
+        ラベルを押してもカメラが開きません。見えないけれど「置いてある」状態にします。
+      -->
       <label class="dropzone" id="dropzone">
-        <input type="file" id="fileInput" accept="video/*" hidden>
+        <input type="file" id="fileInput" accept="video/*" class="visually-hidden">
         <span class="dz-icon">＋</span>
-        <span class="dz-main">動画ファイルを選ぶ</span>
-        <span class="dz-sub">スマホなら、この中の「ビデオを撮る」でその場で撮影できます。パソコンならドラッグ＆ドロップも可</span>
+        <span class="dz-main">保存した動画から選ぶ</span>
+        <span class="dz-sub">パソコンならドラッグ＆ドロップも可</span>
       </label>
 
       <label class="capture-btn" id="captureBtn" hidden>
-        <input type="file" id="captureInput" accept="video/*" capture="environment" hidden>
+        <input type="file" id="captureInput" accept="video/*" capture="environment" class="visually-hidden">
         <span>カメラでスイングを撮る</span>
       </label>
 
@@ -160,6 +164,7 @@
             <button type="button" id="guideReset" disabled>最初に戻す</button>
           </div>
           <p class="note guide-note">
+            <span id="shaftStatus" class="shaft-status"></span>
             線はアドレスの位置で固定しているので、再生しても動きません。
             <strong>線がズレている場合は、「線を動かす」ボタンを押すと修正できます。</strong>
             線の端（●）をつまむとその端だけ、線の途中をつまむと線ごと動きます。

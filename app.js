@@ -30,6 +30,7 @@ const els = {
   guideAdd: $('guideAdd'),
   guideDel: $('guideDel'),
   guideReset: $('guideReset'),
+  shaftStatus: $('shaftStatus'),
   replayBtn: $('replayBtn'),
   tourBtn: $('tourBtn'),
   videoNav: $('videoNav'),
@@ -256,9 +257,17 @@ els.fileInput.addEventListener('change', e => {
 /* --------------------------- カメラで撮って取り込む -----------------------
  * capture 付きの入力は、対応端末ではカメラが直接開きます。パソコンでは
  * ただのファイル選択になって紛らわしいので、カメラがある端末だけに出します。
+ *
+ * 端末名だけで判定すると、名前が変わったときにボタンが出なくなり、
+ * ふつうのファイル選択しか使えなくなります（実際にそうなりました）。
+ * 「指で触る画面か」でも判定して、どちらかに当たれば出します。
+ * capture への対応は調べません（対応していても
+ * 'capture' in input が false を返すブラウザがあるため）。
+ * 出しすぎてもパソコンでファイル選択が開くだけですが、
+ * 出ないとスマホで撮影できなくなるので、出す側に倒しています。
  * ------------------------------------------------------------------------*/
 const hasCamera = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-  || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));   // iPadOS 対策
+  || (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches);
 
 if (hasCamera) els.captureBtn.hidden = false;
 
@@ -435,7 +444,8 @@ async function renderResult(result, frames, keys, opt) {
   current = { frames, keys, opt, lastResult: result };
   setDirty(false);
   if (keptGuides) { current.guides = keptGuides; current.selectedGuide = null; }
-  else initGuides();
+  else { initGuides(); await applyShaftDetection(); }
+  showShaftStatus();
 
   // 切り出し範囲は全ポジションで共通。アドレス基準表の画像でも使うので先に決める
   if (opt.mode !== 'photo') {
@@ -521,6 +531,69 @@ function showSwingVideo(opt) {
  */
 let guideEditing = false;
 let guideDrag = null;
+
+/*
+ * アドレスのコマの画像から実際のシャフトを探し、見つかればその先端（＝ヘッド＝ボール）
+ * を使って、シャフトの線と首の付け根の線を引き直します。
+ * 見つからなければ何もしません（クラブのライ角からの推定のまま）。
+ */
+async function applyShaftDetection() {
+  const { frames, keys, opt } = current;
+  current.shaftFound = false;
+  if (opt.mode === 'photo' || opt.view !== 'side' || keys.address === undefined) return;
+
+  const f = frames[keys.address];
+  const w = els.video.videoWidth, h = els.video.videoHeight;
+  if (!f || !f.lms || !w || !h) return;
+
+  await seekTo(els.video, f.t);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(els.video, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const gray = { data: new Uint8Array(w * h), width: w, height: h };
+  for (let i = 0, j = 0; j < gray.data.length; i += 4, j++) {
+    gray.data[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+  }
+
+  const S = sides(opt.hand);
+  const L = f.lms;
+  const hand = { x: (L[LM.lWrist].x + L[LM.rWrist].x) / 2 * w,
+    y: (L[LM.lWrist].y + L[LM.rWrist].y) / 2 * h };
+  const ground = Math.max(L[S.lead.ankle].y, L[S.trail.ankle].y,
+    L[S.lead.heel].y, L[S.trail.heel].y) * h;
+  const toward = Math.sign((L[S.lead.foot].x + L[S.trail.foot].x)
+    - (L[S.lead.ankle].x + L[S.trail.ankle].x)) || 1;
+
+  const drop = ground - hand.y;
+  if (drop <= 0) return;
+  // いちばん寝たクラブ（地面と 45°）でも届く長さまで探す
+  const maxLen = drop / Math.sin(45 * Math.PI / 180);
+
+  const found = detectShaft(gray, hand, toward, maxLen);
+  if (!found) return;
+
+  current.shaftFound = true;
+  const ball = { x: found.head.x / w, y: found.head.y / h };
+  for (const l of planeLines(L, opt.hand, ball, opt.aspect)) {
+    const i = current.guides.findIndex(g => g.id === l.id);
+    if (i >= 0) current.guides[i] = l;
+    else current.guides.push(l);
+  }
+}
+
+/** 線がどうやって引かれたかを画面に出す */
+function showShaftStatus() {
+  if (!els.shaftStatus) return;
+  if (!current || current.opt.view !== 'side' || current.opt.mode === 'photo') {
+    els.shaftStatus.textContent = '';
+    return;
+  }
+  els.shaftStatus.textContent = current.shaftFound
+    ? '映像から実際のシャフトを見つけて線を引きました。'
+    : 'シャフトを見つけられなかったので、クラブのライ角からの推定で引いています。ズレていたら手で直してください。';
+}
 
 /** アドレスのコマから線を引き直す（診断のたびに呼ぶ） */
 function initGuides() {
@@ -813,8 +886,12 @@ els.guideDel.addEventListener('click', () => {
   drawGuides();
 });
 
-els.guideReset.addEventListener('click', () => {
+els.guideReset.addEventListener('click', async () => {
   initGuides();
+  drawGuides();
+  // 戻すときも、もう一度映像からシャフトを探す（推定に落ちたままにしない）
+  await applyShaftDetection();
+  showShaftStatus();
   updateGuideButtons();
   drawGuides();
 });

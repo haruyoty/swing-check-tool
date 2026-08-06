@@ -10,7 +10,7 @@ const src = ['criteria.js', 'videos.js', 'lessons.js', 'analyzer.js']
   .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
 const A = new Function('document', src + `
   return {detectKeyFrames, measure, diagnose, scoreOne, neckLine, ballGuide, sides, guideLines,
-          estimateBall, planeLines,
+          estimateBall, planeLines, detectShaft,
           lessonVideo, lessonCandidates, searchLessons, normalizeTitle, LESSON_CANDIDATES,
           swingCrop, CRITERIA, CLUBS, VISUAL_CHECKS, PHASE_LABELS, LESSON_QUERIES,
           CHANNEL_VIDEOS, CHANNEL_URL, CATALOG_UPDATED, CONTACT_LINKS, resolveCriterion};`)(null);
@@ -879,6 +879,80 @@ section('11-5. 動画・画像に重ねる赤いガイド線');
   /* --- 骨格が取れていないコマでは何も返さない --- */
   check('骨格がなければ空', A.guideLines(null, 'right', 'front', 'iron', 1).length, 0, 0);
   check('骨格がなければボールも出さない', A.estimateBall(null, 'right', 'iron', 1), null);
+}
+
+section('11-6. 画像からシャフトを探す');
+/*
+ * 手元から伸びる細い線を画像に描いて、その向きと先端を当てられるかを見る。
+ * 実写での結果は analyzer.js の detectShaft のコメントに残してある。
+ */
+{
+  const W = 400, H = 400;
+  /** 手元から deg 方向に、長さ len の線を引いた画像を作る（bright: 明るい線か） */
+  const draw = (deg, len, bright, noise = 0) => {
+    const data = new Uint8Array(W * H);
+    let seed = 12345;                                 // 毎回同じ「ざらつき」にする
+    for (let i = 0; i < data.length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      data[i] = 120 + (noise ? Math.round((seed / 0x7fffffff - 0.5) * 2 * noise) : 0);
+    }
+    const rad = deg * Math.PI / 180;
+    const ux = Math.sin(rad), uy = Math.cos(rad);
+    for (let d = 0; d <= len; d += 0.4) {
+      for (let t = -1; t <= 1; t++) {                 // 太さ 3px ほど
+        const x = Math.round(50 + ux * d + (-uy) * t);
+        const y = Math.round(40 + uy * d + ux * t);
+        if (x >= 0 && y >= 0 && x < W && y < H) data[y * W + x] = bright ? 230 : 20;
+      }
+    }
+    return { data, width: W, height: H };
+  };
+  const hand = { x: 50, y: 40 };
+
+  for (const bright of [true, false]) {
+    const tag = bright ? '明るい線' : '暗い線';
+    const r = A.detectShaft(draw(40, 300, bright), hand, 1, 320);
+    check(`${tag}: 見つかる`, !!r, true);
+    if (r) {
+      check(`${tag}: 角度が合う`, r.deg, 40, 1.5);
+      check(`${tag}: 明暗を正しく判定`, r.polarity, bright ? 1 : -1, 0);
+      check(`${tag}: 先端が線の端に近い`,
+        Math.hypot(r.head.x - (50 + Math.sin(40 * Math.PI / 180) * 300),
+          r.head.y - (40 + Math.cos(40 * Math.PI / 180) * 300)), 0, 25);
+    }
+  }
+
+  // 角度を変えても追える
+  for (const deg of [15, 30, 55, 70]) {
+    const r = A.detectShaft(draw(deg, 300, true), hand, 1, 320);
+    check(`${deg}° の線を当てられる`, r ? r.deg : null, deg, 1.5);
+  }
+
+  // ざらつきがあっても大丈夫
+  {
+    const r = A.detectShaft(draw(40, 300, true, 25), hand, 1, 320);
+    check('ざらついた画像でも当てられる', r ? r.deg : null, 40, 2);
+  }
+
+  // 線が無ければ「自信なし」を返す（呼び出し側は推定に戻る）
+  {
+    const flat = { data: new Uint8Array(W * H).fill(120), width: W, height: H };
+    check('線が無ければ null', A.detectShaft(flat, hand, 1, 320), null);
+  }
+  // 手元から始まっていない線（芝に落ちたクラブの影など）は拾わない
+  {
+    const g = draw(40, 300, false);
+    const shifted = { data: new Uint8Array(W * H).fill(120), width: W, height: H };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const s = g.data[y * W + x];
+        if (s !== 120 && x + 60 < W) shifted.data[y * W + x + 60] = s;   // 右に 60px ずらす
+      }
+    }
+    const r = A.detectShaft(shifted, hand, 1, 320);
+    check('手元から離れた線は拾わない', !r || Math.abs(r.deg - 40) > 3, true);
+  }
+  check('画像が無ければ null', A.detectShaft(null, hand, 1, 320), null);
 }
 
 section('11-4. 人物の切り出し範囲');

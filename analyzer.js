@@ -549,9 +549,6 @@ function measure(frames, keys, handedness, view, aspect) {
     const bodyCenter = mid(shoulderC(A), hipC(A));
     m.handPosFront = (handC(A).x - bodyCenter.x) * targetSign / torso;
 
-    // 右手（トレール手）が体のセンターに来ているか。0 に近いほど中央
-    m.trailHandCenter = (A[S.trail.wrist].x - bodyCenter.x) * targetSign / torso;
-
     // 肩の傾き（トレール肩が下がっていればプラス）
     m.shoulderTilt = deg(Math.atan2(
       A[S.trail.shoulder].y - A[S.lead.shoulder].y,
@@ -823,6 +820,106 @@ function guideAnchors(lms, handedness, aspect) {
     shoulderC, hipC, torso, ground,
     hands: mid(lms[LM.lWrist], lms[LM.rWrist]),
     aboveHead: lms[LM.nose].y - torso * 0.35 * 1.1
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * シャフトを画像から探す
+ *
+ * 骨格検出はクラブを認識しませんが、シャフトは「手元から伸びる、細くて長い、
+ * 途中で途切れない直線」です。手元の位置は骨格から正確に分かるので、そこを
+ * 起点に角度を振って、その条件にいちばん合う向きを選べば見つけられます。
+ *
+ * 実測（後方から撮った夜のティーショット、1920x1080）:
+ *   明るい線として探すと 40° で被覆率 98%、5°以上離れた次点は 59%。
+ *   ヘッド位置は目視との差 33px。
+ *   同じ方法を正面からの映像で試すと 74% 対 57% までしか離れず、
+ *   シャフトが体と重なるぶん不利でした。後方からのほうが向いています。
+ *
+ * 明るいシャフトにも暗いシャフトにもなるので、両方の向きで探して良いほうを採ります。
+ * 芝に落ちたクラブの影は暗い線として出ますが、手元から始まっていないので、
+ * 起点を手元に固定することで自然に外れます。
+ * -------------------------------------------------------------------------*/
+
+/** 走査の細かさ（度）。実測では 1° 刻みでも山がはっきり出ます */
+const SHAFT_STEP = 0.5;
+
+/**
+ * @param gray   { data, width, height } 輝度（0〜255）の配列
+ * @param hand   手元の画素座標 { x, y }
+ * @param toward ボール側の符号（+1 なら画面右がボール側）
+ * @param maxLen 手元からどこまで探すか（画素）
+ * @returns { deg, coverage, polarity, head } または null（自信がないとき）
+ */
+function detectShaft(gray, hand, toward, maxLen) {
+  if (!gray || !gray.data || !maxLen) return null;
+  const { data, width, height } = gray;
+  const at = (x, y) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= width || yi >= height) return NaN;
+    return data[yi * width + xi];
+  };
+
+  const side = Math.max(3, Math.round(maxLen * 0.014));   // 線の左右をどれだけ離して比べるか
+  const margin = 10;                                      // これ以上の差がなければ線とみなさない
+  const d0 = maxLen * 0.18, d1 = maxLen;
+
+  /* その角度・その明暗で、線の上にいる点の割合 */
+  const coverage = (deg, polarity, upTo) => {
+    const rad = deg * Math.PI / 180;
+    const ux = Math.sin(rad) * toward, uy = Math.cos(rad);
+    const nx = -uy, ny = ux;
+    let hit = 0, n = 0;
+    for (let d = d0; d <= (upTo || d1); d++) {
+      let ok = false;
+      for (let off = -2; off <= 2; off++) {          // 少し曲がっていても拾う
+        const x = hand.x + ux * d + nx * off, y = hand.y + uy * d + ny * off;
+        const c = at(x, y);
+        const a = at(x + nx * side, y + ny * side);
+        const b = at(x - nx * side, y - ny * side);
+        if (isNaN(c) || isNaN(a) || isNaN(b)) continue;
+        if ((c - a) * polarity > margin && (c - b) * polarity > margin) { ok = true; break; }
+      }
+      if (ok) hit++;
+      n++;
+    }
+    return n ? hit / n : 0;
+  };
+
+  let best = null;
+  for (const polarity of [1, -1]) {
+    const rows = [];
+    for (let deg = 5; deg <= 80; deg += SHAFT_STEP) rows.push([deg, coverage(deg, polarity)]);
+    rows.sort((a, b) => b[1] - a[1]);
+    const top = rows[0];
+    // 5°以上離れたところの最良と比べて、はっきり抜けているか
+    const rival = rows.find(r => Math.abs(r[0] - top[0]) > 5) || [0, 0];
+    const cand = { deg: top[0], coverage: top[1], rival: rival[1], polarity };
+    if (!best || cand.coverage > best.coverage) best = cand;
+  }
+  // 自信がないときは何も返さない（呼び出し側がライ角からの推定に戻します）
+  if (!best || best.coverage < 0.7 || best.coverage < best.rival * 1.25) return null;
+
+  /* その向きで線がどこまで続くか＝ヘッドの位置 */
+  const rad = best.deg * Math.PI / 180;
+  const ux = Math.sin(rad) * toward, uy = Math.cos(rad);
+  const nx = -uy, ny = ux;
+  let last = d0;
+  for (let d = d0; d <= maxLen * 1.15; d++) {
+    let ok = false;
+    for (let off = -2; off <= 2; off++) {
+      const x = hand.x + ux * d + nx * off, y = hand.y + uy * d + ny * off;
+      const c = at(x, y);
+      const a = at(x + nx * side, y + ny * side);
+      const b = at(x - nx * side, y - ny * side);
+      if (isNaN(c) || isNaN(a) || isNaN(b)) continue;
+      if ((c - a) * best.polarity > margin && (c - b) * best.polarity > margin) { ok = true; break; }
+    }
+    if (ok) last = d;
+  }
+  return {
+    deg: best.deg, coverage: best.coverage, polarity: best.polarity,
+    head: { x: hand.x + ux * last, y: hand.y + uy * last }
   };
 }
 
