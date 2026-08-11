@@ -1316,7 +1316,8 @@ section('14. 骨格検出が乱れたフレームに引っ張られないか');
     check(`揺れ±${amp}: トップが本番のトップ`, kN.top - OFFSET, 45, 3);
     check(`揺れ±${amp}: インパクトが本番のインパクト`, kN.impact - OFFSET, 60, 3);
     check(`揺れ±${amp}: アドレスがトップより前`, kN.address < kN.top, true);
-    check(`揺れ±${amp}: トップがアドレス付近に落ちていない`, kN.top - kN.address > 20, true);
+    check(`揺れ±${amp}: トップがアドレス付近に落ちていない（間隔 ${kN.top - kN.address} コマ）`,
+      kN.top - kN.address > 20, true);
   }
 }
 

@@ -475,20 +475,21 @@ function renderContacts() {
   img.addEventListener('load', show);
   img.addEventListener('error', hide);
 
-  for (const c of CONTACT_LINKS) {
+  CONTACT_LINKS.forEach((c, i) => {
     const a = document.createElement('a');
-    a.className = 'contact-link';
+    // 先頭（オンラインスイング診断）はいちばん見てほしいので、大きく目立たせます
+    a.className = 'contact-link' + (i === 0 ? ' primary-link' : '');
     a.href = c.url;
     a.target = '_blank';
     a.rel = 'noopener';
     const lead = text('span', c.lead);
     lead.className = 'contact-lead';
     // 押せる場所だと一目で分かるように、ボタン風の行を必ず付けます
-    const cta = text('span', 'ページを開く');
+    const cta = text('span', i === 0 ? 'LINE で受け付けています' : 'ページを開く');
     cta.className = 'contact-cta';
     a.append(text('strong', c.title), lead, cta);
     els.contactLinks.appendChild(a);
-  }
+  });
 }
 
 /** キーフレームを動かしたあと、診断し直せることを知らせる */
@@ -970,9 +971,10 @@ function showPhaseNotes(phase) {
 
   for (const b of els.videoNav.children) b.classList.toggle('active', b.dataset.phase === phase);
 
+  // 見出しは置きません。すぐ上（スマホでは下）のボタンが緑に光って
+  // どのポジションかを示しているので、名前が 2 回並んでしまうためです
   const box = els.videoNotes;
   box.innerHTML = '';
-  box.appendChild(text('h3', PHASE_LABELS[phase] || phase));
 
   const items = result.items.filter(i => i.phase === phase);
   const checks = VISUAL_CHECKS.filter(
@@ -1027,6 +1029,26 @@ function renderScore(result) {
 }
 
 /** 写真モードの未入力、または動画のどの区間を解析したかを知らせる */
+/*
+ * 動画がスイングの途中で終わっていないかを見ます。
+ *
+ * インパクトのすぐあとで映像が切れていると、フォローもフィニッシュも
+ * 「残っている最後の数コマ」に押し込まれ、まったく別の姿勢で判定されます。
+ * 実測した動画では、インパクト 12.37 秒に対して映像が 12.55 秒で終わっており、
+ * フォロー 12.43 秒・フィニッシュ 12.50 秒と 0.07 秒刻みになっていました。
+ * 直しようがないので、撮り直しの目安として知らせます。
+ */
+function swingCutOff(keys) {
+  const { frames } = current || {};
+  if (!frames || keys.impact === undefined || keys.finish === undefined) return null;
+  const after = frames[frames.length - 1].t - frames[keys.impact].t;
+  if (after >= 0.5) return null;
+  return `インパクトのあと ${after.toFixed(2)} 秒で映像が終わっています。`
+    + 'フォローとフィニッシュは振り抜いた姿勢まで写っていないため、'
+    + 'この 2 つの判定はあてになりません。振り終わって静止するまで（インパクトの 1 秒後くらいまで）'
+    + '撮ると、正しく判定できます。';
+}
+
 function renderModeNote(opt, keys, result) {
   if (opt.mode !== 'photo') {
     const r = opt.range;
@@ -1041,6 +1063,13 @@ function renderModeNote(opt, keys, result) {
         'ここがスイングでない場合は、前の画面に戻って「現在位置を開始に / 終了に」で範囲を指定し直してください。' +
         'キーフレームが少しずれているだけなら、下の各画像の ◀ ▶ で位置を直したあと、'
         + '「修正した位置で診断し直す」を押してください。'));
+
+      const cut = swingCutOff(keys);
+      if (cut) {
+        const warn = text('span', cut);
+        warn.className = 'mode-warn';
+        els.modeNote.append(warn);
+      }
       els.modeNote.hidden = false;
     } else {
       els.modeNote.hidden = true;

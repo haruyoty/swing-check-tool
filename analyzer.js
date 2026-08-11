@@ -390,6 +390,43 @@ function detectKeyFrames(frames, handedness) {
     while (i > 0 && move(i) >= STILL) i--;
     address = i;
   }
+
+  /*
+   * ここまでで見つかるのは「静止していた区間の終わり」ですが、構えたあとに
+   * ワッグル（クラブを小さく揺らす）が入ると、そこで静止が途切れてしまい、
+   * ワッグルより前でアドレスが確定してしまいます。実測した動画では、
+   * 実際は 11.28 秒に振り始めているのに 10.73 秒と 0.5 秒早く出ていました。
+   *
+   * ワッグルは動いてもすぐ元の高さに戻ります。そこで、手元がアドレスの高さに
+   * とどまっているあいだは「まだ構えの途中」とみなして先へ進めます。
+   * 手元がはっきり上がり始めたところが、本当の振り始めです。
+   */
+  if (address >= 0 && Y[address] !== null) {
+    const base = Y[address];
+    const tight = rise * 0.01;
+
+    /* ワッグルの跡があるかを先に確かめます。ワッグルは「離れて、また元の高さに
+     * 戻る」動きです。すっと振り始めるスイングでは戻ってこないので、
+     * その場合はここで見つけたアドレスをそのまま使います。 */
+    let left = false, waggled = false;
+    for (let j = address + 1; j < top; j++) {
+      if (Y[j] === null) continue;
+      const d = Math.abs(Y[j] - base);
+      if (d > tight * 2) left = true;
+      else if (left && d <= tight) { waggled = true; break; }
+    }
+
+    if (waggled) {
+      const band = rise * 0.02;                  // これ以上上がったら振り始め
+      /* 進めすぎの歯止め。骨格検出が大きく揺れると、band を跨がないまま
+       * トップの直前まで進んでしまいます。ワッグルの補正でバックスイングの
+       * 半分近くを食いつぶすことはないので、45% を上限にします。 */
+      const limit = address + Math.floor((top - address) * 0.45);
+      let j = address;
+      while (j < limit && Y[j + 1] !== null && Y[j + 1] > base - band) j++;
+      address = j;
+    }
+  }
   if (Y[address] === null || address >= top) return null;
 
   /* 3. インパクト = トップ以降で手元がいちばん低くなるコマ

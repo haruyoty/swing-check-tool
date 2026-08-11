@@ -698,6 +698,8 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   font-weight: 700;
   line-height: 1.7;
 }
+.mode-warn { color: var(--bad); font-weight: 700; }
+
 .phase-summary.s-good { border-left-color: var(--good); }
 .phase-summary.s-warn { border-left-color: var(--warn); }
 .phase-summary.s-bad { border-left-color: var(--bad); }
@@ -949,6 +951,24 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
   margin-bottom: 4px;
 }
 .contact-link strong::after { content: ' ↗'; font-size: .8em; }
+
+/* いちばん見てほしい案内（オンラインスイング診断）を大きく出す */
+.contact-link.primary-link {
+  border-width: 3px;
+  padding: 20px 20px 22px;
+  box-shadow: 0 3px 14px rgba(31, 122, 77, .18);
+}
+.contact-link.primary-link strong {
+  font-size: 1.22rem;
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+.contact-link.primary-link .contact-lead { font-size: .92rem; }
+.contact-link.primary-link .contact-cta {
+  font-size: .95rem;
+  padding: 12px 26px;
+  margin-top: 14px;
+}
 .contact-lead {
   display: block;
   font-size: .85rem;
