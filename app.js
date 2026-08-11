@@ -971,10 +971,9 @@ function showPhaseNotes(phase) {
 
   for (const b of els.videoNav.children) b.classList.toggle('active', b.dataset.phase === phase);
 
-  // 見出しは置きません。すぐ上（スマホでは下）のボタンが緑に光って
-  // どのポジションかを示しているので、名前が 2 回並んでしまうためです
   const box = els.videoNotes;
   box.innerHTML = '';
+  box.appendChild(text('h3', PHASE_LABELS[phase] || phase));
 
   const items = result.items.filter(i => i.phase === phase);
   const checks = VISUAL_CHECKS.filter(

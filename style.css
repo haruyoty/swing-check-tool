@@ -1018,11 +1018,22 @@ button.mini:not(:disabled):hover { border-color: var(--accent); color: var(--acc
 /* ------------------------------ スマホ向け -------------------------------- */
 
 @media (max-width: 520px) {
+  /*
+   * 文字の大きさはほぼ rem で書いてあるので、基準（既定 16px）を上げれば
+   * 全体がまとめて大きくなります。スマホでは 18px にして 1.125 倍。
+   */
+  html { font-size: 18px; }
+
   body { padding: 0 12px 48px; }
   .site-header { padding-top: 28px; }
   .site-header h1 { font-size: 1.4rem; }
   .card { padding: 16px 14px; }
   .score-card { justify-content: center; text-align: center; }
+
+  /* いちばん小さかった補足類は、それでも小さいので下限を上げる */
+  .note, .guide-note, .lead-note, .shaft-status { font-size: .85rem; }
+  .video-notes .note-value, .ref-measure .rm-range { font-size: .85rem; }
+  .badge { font-size: .78rem; }
 }
 
 /* 指で押せる大きさを確保する（マウスより広い面積が要る） */
