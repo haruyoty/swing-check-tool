@@ -177,16 +177,35 @@ main, .site-header, .site-footer { max-width: 780px; margin: 0 auto; }
 .capture-btn::before { content: '📷'; font-size: 1.15rem; }
 .capture-btn:active { filter: brightness(.92); }
 
-/* 端末のカメラアプリを開く逃げ道（ブラウザ内で録れないとき用） */
+/* 端末のカメラアプリを開く逃げ道（ブラウザ内で録れないとき用）。
+   ここに来る人は上のボタンで困っているので、小さく添えずはっきり見せます */
 .capture-fallback {
   display: block;
-  margin-top: 8px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
   text-align: center;
-  font-size: .82rem;
-  color: var(--ink-sub);
-  text-decoration: underline;
   cursor: pointer;
+  transition: .15s;
 }
+.capture-fallback strong {
+  display: block;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+.capture-fallback span {
+  display: block;
+  margin-top: 2px;
+  font-size: .85rem;
+  font-weight: 400;
+  color: var(--ink-sub);
+}
+.capture-fallback:hover { background: var(--accent); color: var(--card); }
+.capture-fallback:hover span { color: var(--card); }
+.capture-fallback:active { filter: brightness(.94); }
 
 /* ブラウザの中で録画する画面 */
 .recorder { margin-top: 14px; }
