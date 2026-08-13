@@ -17,6 +17,12 @@ const els = {
   result: $('result'),
   captureBtn: $('captureBtn'),
   captureInput: $('captureInput'),
+  captureFallback: $('captureFallback'),
+  recorder: $('recorder'),
+  recPreview: $('recPreview'),
+  recToggle: $('recToggle'),
+  recTime: $('recTime'),
+  recCancel: $('recCancel'),
   videoInput: $('videoInput'),
   photoInput: $('photoInput'),
   photoGrid: $('photoGrid'),
@@ -255,21 +261,25 @@ els.fileInput.addEventListener('change', e => {
 });
 
 /* --------------------------- カメラで撮って取り込む -----------------------
- * capture 付きの入力は、対応端末ではカメラが直接開きます。パソコンでは
- * ただのファイル選択になって紛らわしいので、カメラがある端末だけに出します。
+ * ファイル入力の capture 属性で端末のカメラアプリを開く方法は、Android では
+ * 機種や入っているアプリによってカメラが開いたり、ただのファイル選択になったり
+ * とばらつきます（実機で確認）。そこで、ブラウザの中で直接録画します。
+ *   getUserMedia でカメラ映像をもらう → MediaRecorder で録る → その場で読み込む
+ * 端末のカメラアプリを経由しないので、機種による差が出ません。
  *
- * 端末名だけで判定すると、名前が変わったときにボタンが出なくなり、
- * ふつうのファイル選択しか使えなくなります（実際にそうなりました）。
- * 「指で触る画面か」でも判定して、どちらかに当たれば出します。
- * capture への対応は調べません（対応していても
- * 'capture' in input が false を返すブラウザがあるため）。
- * 出しすぎてもパソコンでファイル選択が開くだけですが、
- * 出ないとスマホで撮影できなくなるので、出す側に倒しています。
+ * 録れない端末（古い iOS など）のために、capture 付きの入力も逃げ道として残します。
  * ------------------------------------------------------------------------*/
 const hasCamera = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   || (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches);
 
-if (hasCamera) els.captureBtn.hidden = false;
+/** ブラウザ内で録画できるか */
+const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+  && window.MediaRecorder);
+
+if (hasCamera) {
+  els.captureBtn.hidden = false;
+  els.captureFallback.hidden = false;
+}
 
 els.captureInput.addEventListener('change', e => {
   const file = e.target.files[0];
@@ -283,6 +293,113 @@ els.captureInput.addEventListener('change', e => {
   e.target.value = '';
 });
 
+/* ------------------------ ブラウザの中で録画する ------------------------ */
+
+let recStream = null, recorder = null, recChunks = [], recTimer = 0, recStart = 0;
+
+/** その端末で使える動画形式を選ぶ（Safari は mp4、Chrome は webm） */
+function recorderMime() {
+  const list = ['video/mp4;codecs=avc1', 'video/mp4',
+    'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const t of list) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
+async function openRecorder() {
+  if (!canRecord) { els.captureInput.click(); return; }   // 録れない端末は逃げ道へ
+  hideError();
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
+      audio: false
+    });
+  } catch (err) {
+    // 許可されなかった／カメラが無い。端末のカメラアプリに切り替える
+    showError('カメラを使えませんでした（' + (err && err.name ? err.name : '不明') + '）。'
+      + '下の「端末のカメラアプリで撮る」からお試しください。');
+    return;
+  }
+  els.recPreview.srcObject = recStream;
+  els.recorder.hidden = false;
+  els.captureBtn.hidden = true;
+  setRecording(false);
+}
+
+function closeRecorder() {
+  stopTimer();
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  recorder = null;
+  if (recStream) { for (const t of recStream.getTracks()) t.stop(); recStream = null; }
+  els.recPreview.srcObject = null;
+  els.recorder.hidden = true;
+  els.captureBtn.hidden = !hasCamera;
+}
+
+function stopTimer() { if (recTimer) { clearInterval(recTimer); recTimer = 0; } }
+
+function setRecording(on) {
+  els.recToggle.textContent = on ? '■ 停止' : '● 撮影開始';
+  els.recToggle.classList.toggle('recording', on);
+  if (!on) { stopTimer(); els.recTime.textContent = '0.0 秒'; }
+}
+
+els.captureBtn.addEventListener('click', openRecorder);
+els.recCancel.addEventListener('click', closeRecorder);
+
+els.recToggle.addEventListener('click', () => {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  if (!recStream) return;
+
+  const mime = recorderMime();
+  recChunks = [];
+  try {
+    recorder = new MediaRecorder(recStream, mime ? { mimeType: mime } : undefined);
+  } catch (e) {
+    showError('この端末では録画できませんでした。下の「端末のカメラアプリで撮る」をお使いください。');
+    closeRecorder();
+    return;
+  }
+  recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    setRecording(false);
+    const type = mime || 'video/webm';
+    const blob = new Blob(recChunks, { type });
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    closeRecorder();
+    if (blob.size) loadVideo(new File([blob], `swing.${ext}`, { type }));
+  };
+  recorder.start();
+  setRecording(true);
+  recStart = Date.now();
+  recTimer = setInterval(() => {
+    els.recTime.textContent = ((Date.now() - recStart) / 1000).toFixed(1) + ' 秒';
+  }, 100);
+});
+
+/*
+ * その場で録画した動画は、長さが書き込まれないまま渡ってくることがあり、
+ * video.duration が Infinity になります。そのままだと解析範囲を決められないので、
+ * いったんうんと先へシークして、ブラウザに長さを数えさせます。
+ */
+function fixDuration(v) {
+  if (isFinite(v.duration) && v.duration > 0) return Promise.resolve();
+  return new Promise(resolve => {
+    const done = () => {
+      v.removeEventListener('durationchange', onChange);
+      clearTimeout(timer);
+      v.currentTime = 0;
+      resolve();
+    };
+    const onChange = () => { if (isFinite(v.duration) && v.duration > 0) done(); };
+    v.addEventListener('durationchange', onChange);
+    const timer = setTimeout(done, 3000);       // 数えられなくても先へ進む
+    v.currentTime = 1e6;
+  });
+}
+
 function loadVideo(file) {
   if (!file.type.startsWith('video/')) {
     showError('動画ファイルを選んでください。');
@@ -294,7 +411,8 @@ function loadVideo(file) {
 
   els.video.src = URL.createObjectURL(file);
   els.video.hidden = false;
-  els.video.onloadedmetadata = () => {
+  els.video.onloadedmetadata = async () => {
+    await fixDuration(els.video);
     videoReady = true;
     manualRange = null;
     els.rangeBox.hidden = false;
@@ -303,7 +421,9 @@ function loadVideo(file) {
     els.dropzone.classList.add('has-file');
     els.dropzone.querySelector('.dz-main').textContent = file.name;
     els.dropzone.querySelector('.dz-sub').textContent =
-      `${els.video.videoWidth}×${els.video.videoHeight} / ${els.video.duration.toFixed(1)}秒　（クリックで選び直し）`;
+      `${els.video.videoWidth}×${els.video.videoHeight}`
+      + (isFinite(els.video.duration) ? ` / ${els.video.duration.toFixed(1)}秒` : '')
+      + '　（クリックで選び直し）';
   };
   els.video.onerror = () => showError('この動画は読み込めませんでした。mp4 形式でお試しください。');
 }

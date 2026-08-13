@@ -66,10 +66,23 @@
         <span class="dz-sub">パソコンならドラッグ＆ドロップも可</span>
       </label>
 
-      <label class="capture-btn" id="captureBtn" hidden>
+      <button type="button" class="capture-btn" id="captureBtn" hidden>カメラでスイングを撮る</button>
+
+      <!-- ブラウザ内で録画できないときの逃げ道（端末のカメラアプリを開く） -->
+      <label class="capture-fallback" id="captureFallback" hidden>
         <input type="file" id="captureInput" accept="video/*" capture="environment" class="visually-hidden">
-        <span>カメラでスイングを撮る</span>
+        <span>カメラが開かないときは、こちらから端末のカメラアプリで撮る</span>
       </label>
+
+      <div class="recorder" id="recorder" hidden>
+        <video id="recPreview" playsinline muted autoplay></video>
+        <div class="rec-bar">
+          <button type="button" id="recToggle" class="primary">● 撮影開始</button>
+          <span class="rec-time" id="recTime">0.0 秒</span>
+          <button type="button" id="recCancel" class="secondary">やめる</button>
+        </div>
+        <p class="note">全身が入る位置にスマホを置いて、撮影開始を押してください。撮り終わったら停止を押すと、そのまま解析に進めます。</p>
+      </div>
 
       <div id="videoSlot">
         <video id="video" playsinline muted controls preload="auto" hidden></video>
