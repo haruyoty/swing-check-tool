@@ -18,6 +18,7 @@ const els = {
   captureBtn: $('captureBtn'),
   captureInput: $('captureInput'),
   captureFallback: $('captureFallback'),
+  cameraHelp: $('cameraHelp'),
   recorder: $('recorder'),
   recPreview: $('recPreview'),
   recToggle: $('recToggle'),
@@ -276,14 +277,37 @@ const hasCamera = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
   && window.MediaRecorder);
 
+/* LINE や Instagram の中のブラウザ。カメラを使えないことが多い */
+const IN_APP_BROWSER = /\bLine\/|FBAN|FBAV|Instagram|Twitter|MicroMessenger/i
+  .test(navigator.userAgent);
+
 if (hasCamera) {
   els.captureBtn.hidden = false;
   els.captureFallback.hidden = false;
 }
 
+/*
+ * 逃げ道（端末のカメラアプリ）も、開かなかったときは何も起きません。
+ * カメラアプリが開けばこの画面はいったん裏に回るので、「押したのに
+ * すぐ戻ってきて、動画も選ばれていない」なら開かなかったと判断します。
+ */
+let fallbackTapped = 0;
+els.captureFallback.addEventListener('click', () => { fallbackTapped = Date.now(); });
+window.addEventListener('focus', () => {
+  if (!fallbackTapped) return;
+  const quick = Date.now() - fallbackTapped < 1500;
+  fallbackTapped = 0;
+  if (quick && !videoReady) {
+    showCameraHelp('端末のカメラアプリを開けませんでした。下の手順でお試しください。');
+  }
+});
+
+// アプリの中のブラウザでは、そもそもカメラを使えないことが多いので先に案内する
+if (hasCamera && IN_APP_BROWSER) els.cameraHelp.hidden = false;
+
 els.captureInput.addEventListener('change', e => {
   const file = e.target.files[0];
-  if (file) loadVideo(file);
+  if (file) { fallbackTapped = 0; els.cameraHelp.hidden = true; loadVideo(file); }
   /*
    * カメラで撮り直したときに何も起きなくなるのを防ぎます。
    * スマホのカメラが返すファイルは毎回同じ名前になることがあり、その場合
@@ -307,19 +331,57 @@ function recorderMime() {
   return '';
 }
 
+/*
+ * カメラが使えない環境を先に見分けます。
+ * ここを黙って素通りさせると「押しても何も起きない」になってしまうので、
+ * 何が起きているかと、どうすれば撮れるかを必ず画面に出します。
+ */
+function cameraProblem() {
+  if (IN_APP_BROWSER) {
+    return 'LINE などアプリの中のブラウザでは、カメラを使えないことがあります。'
+      + '画面の「…」から Safari や Chrome で開き直すか、下の手順でお試しください。';
+  }
+  if (!window.isSecureContext) {
+    return 'この画面は保護された接続（https）ではないため、ブラウザがカメラの使用を'
+      + '止めています。https:// で始まるアドレスから開いてください。';
+  }
+  if (!canRecord) {
+    return 'このブラウザは画面の中での録画に対応していません。下の手順でお試しください。';
+  }
+  return null;
+}
+
+/** 撮れないときの手順を画面に出す */
+function showCameraHelp(msg) {
+  showError(msg);
+  els.cameraHelp.hidden = false;
+}
+
 async function openRecorder() {
-  if (!canRecord) { els.captureInput.click(); return; }   // 録れない端末は逃げ道へ
   hideError();
-  try {
-    recStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
-      audio: false
-    });
-  } catch (err) {
-    // 許可されなかった／カメラが無い。端末のカメラアプリに切り替える
-    showError('カメラを使えませんでした（' + (err && err.name ? err.name : '不明') + '）。'
-      + '下の「端末のカメラアプリで撮る」からお試しください。');
+  const problem = cameraProblem();
+  if (problem) { showCameraHelp(problem); return; }
+
+  // まず背面カメラ・高画質で頼み、断られたら条件を外してもう一度頼む
+  const tries = [
+    { video: { facingMode: { ideal: 'environment' },
+      width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false },
+    { video: true, audio: false }
+  ];
+  let err = null;
+  for (const req of tries) {
+    try { recStream = await navigator.mediaDevices.getUserMedia(req); err = null; break; }
+    catch (e) { err = e; }
+  }
+  if (!recStream) {
+    const name = (err && err.name) || '不明';
+    const why = {
+      NotAllowedError: 'カメラの使用が許可されませんでした。ブラウザのアドレス欄の鍵マークから、カメラを「許可」にしてください。',
+      NotFoundError: 'カメラが見つかりませんでした。',
+      NotReadableError: '他のアプリがカメラを使っています。そのアプリを閉じてからお試しください。',
+      SecurityError: 'ブラウザの設定でカメラが止められています。'
+    }[name] || ('カメラを開けませんでした（' + name + '）。');
+    showCameraHelp(why);
     return;
   }
   els.recPreview.srcObject = recStream;
